@@ -3,11 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #![forbid(unsafe_code)]
+// #![warn(missing_docs)]
 
 use thiserror::Error;
 
 use body::Question;
-use body::ResourceRecords;
+use body::ResourceRecord;
 use header::DnsHeader;
 
 mod binutils;
@@ -25,19 +26,19 @@ pub mod header;
 // +---------------------+
 // |      Additional     | RRs holding additional information
 // +---------------------+
-#[derive(Debug)]
-pub struct DnsPacket {
+#[derive(Debug, Clone)]
+pub struct DnsPacket<'a> {
     pub header: DnsHeader,
-    pub questions: Vec<Question>,
-    pub answers: Vec<ResourceRecords>,
-    pub authority: Vec<ResourceRecords>,
-    pub additional: Vec<ResourceRecords>,
+    pub questions: Vec<Question<'a>>,
+    pub answers: Vec<ResourceRecord<'a>>,
+    pub authority: Vec<ResourceRecord<'a>>,
+    pub additional: Vec<ResourceRecord<'a>>,
 }
 
-impl TryFrom<&[u8]> for DnsPacket {
+impl<'a> TryFrom<&'a [u8]> for DnsPacket<'a> {
     type Error = ParseError;
 
-    fn try_from(buff: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(buff: &'a [u8]) -> Result<Self, Self::Error> {
         let header = DnsHeader::try_from(buff)?;
         let mut questions = Vec::with_capacity(header.questions as _);
         let mut answers = Vec::with_capacity(header.answers as _);
@@ -50,17 +51,17 @@ impl TryFrom<&[u8]> for DnsPacket {
             questions.push(q);
         }
         for _ in 0..header.answers {
-            let (a, size) = ResourceRecords::parse(buff, pos)?;
+            let (a, size) = ResourceRecord::parse(buff, pos)?;
             pos += size;
             answers.push(a)
         }
         for _ in 0..header.authority {
-            let (a, size) = ResourceRecords::parse(buff, pos)?;
+            let (a, size) = ResourceRecord::parse(buff, pos)?;
             pos += size;
             authority.push(a)
         }
         for _ in 0..header.additional {
-            let (a, size) = ResourceRecords::parse(buff, pos)?;
+            let (a, size) = ResourceRecord::parse(buff, pos)?;
             pos += size;
             additional.push(a)
         }
@@ -71,6 +72,25 @@ impl TryFrom<&[u8]> for DnsPacket {
             authority,
             additional,
         })
+    }
+}
+
+impl From<&DnsPacket<'_>> for Vec<u8> {
+    fn from(dns: &DnsPacket<'_>) -> Self {
+        let mut out = (&dns.header).into();
+        for question in &dns.questions {
+            question.serialize(&mut out);
+        }
+        for answer in &dns.answers {
+            answer.serialize(&mut out);
+        }
+        for auth in &dns.authority {
+            auth.serialize(&mut out);
+        }
+        for extra in &dns.additional {
+            extra.serialize(&mut out);
+        }
+        out
     }
 }
 

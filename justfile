@@ -3,7 +3,7 @@ default:
 
 # Check for incompatible licenses and security advisories, lint and run tests
 check:
-  cargo deny check
+  # cargo deny check
   cargo clippy
   cargo test
 

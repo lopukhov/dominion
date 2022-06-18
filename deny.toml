@@ -13,19 +13,12 @@ targets = []
 # More documentation for the advisories section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
-# The path where the advisory database is cloned/fetched into
 db-path = "~/.cargo/advisory-db"
-# The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# The lint level for security vulnerabilities
 vulnerability = "deny"
-# The lint level for unmaintained crates
 unmaintained = "warn"
-# The lint level for crates that have been yanked from their source registry
 yanked = "warn"
-# The lint level for crates with security notices.
 notice = "warn"
-# A list of advisory IDs to ignore.
 ignore = []
 
 # This section is considered when running `cargo deny check licenses`
@@ -33,14 +26,12 @@ ignore = []
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
 unlicensed = "deny"
-# List of explicitly allowed licenses
 allow = [
   "MIT",
   "Apache-2.0",
   "MPL-2.0",
   "BSD-3-Clause"
 ]
-# List of explicitly disallowed licenses
 deny = []
 copyleft = "warn"
 allow-osi-fsf-free = "neither"

@@ -7,80 +7,138 @@ use crate::CorruptedPackageError;
 use crate::NotImplementedError;
 use crate::ParseError;
 use std::fmt;
+use std::iter::zip;
+use std::iter::Copied;
+use std::iter::Rev;
 use std::str;
+
+const INIT_NUM_LABELS: usize = 4;
 
 pub(crate) const MAX_JUMPS: u8 = 5;
 
 pub(crate) const MAX_LABEL_SIZE: usize = 63;
 pub(crate) const MAX_NAME_SIZE: usize = 255;
 
-const INIT_CAP: usize = 32;
+#[derive(Clone)]
+pub struct Name<'a>(Vec<&'a str>);
 
-#[derive(Clone, Debug)]
-pub struct Name(String);
+type IterHuman<'a> = Rev<IterHierarchy<'a>>;
+type IterHierarchy<'a> = Copied<std::slice::Iter<'a, &'a str>>;
 
-impl fmt::Display for Name {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
+impl fmt::Display for Name<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for l in self.iter_human() {
+            write!(f, "{}.", l)?;
+        }
+        Ok(())
     }
 }
 
-impl Name {
-    pub(crate) fn parse(packet: &[u8], start: usize) -> Result<(Self, usize), ParseError> {
-        let mut s = String::with_capacity(INIT_CAP);
-        let n = parse_with_jumps(&mut s, packet, start)?;
-        if s.len() < MAX_NAME_SIZE {
-            Ok((Name(s), n))
+impl fmt::Debug for Name<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for l in self.iter_human() {
+            write!(f, "{}.", l)?;
+        }
+        Ok(())
+    }
+}
+
+impl Default for Name<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<Name<'_>> for Vec<u8> {
+    fn from(name: Name) -> Self {
+        let mut out = Vec::with_capacity(name.0.len() * 8);
+        name.serialize(&mut out);
+        out
+    }
+}
+
+impl<'a> Name<'a> {
+    pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
+        let (positions, n) = find_labels(buff, pos)?;
+        let name = parse_labels(buff, positions)?;
+        Ok((name, n))
+    }
+
+    pub fn serialize(&self, packet: &mut Vec<u8>) {
+        for label in self.iter_human() {
+            packet.push(label.len() as _);
+            packet.extend(label.as_bytes());
+        }
+        packet.push(0u8);
+    }
+
+    pub fn new() -> Self {
+        Name(Vec::with_capacity(INIT_NUM_LABELS))
+    }
+
+    pub fn tld(&self) -> Option<&str> {
+        self.0.get(0).copied()
+    }
+
+    pub fn push_label(&mut self, label: &'a str) {
+        self.0.push(label);
+    }
+
+    pub fn is_subdomain(&self, sub: &Name<'_>) -> bool {
+        if self.0.len() > sub.0.len() {
+            false
         } else {
-            Err(CorruptedPackageError::NameLength(s.len()))?
+            zip(self.iter_hierarchy(), sub.iter_hierarchy()).fold(true, |acc, (x, y)| acc && x == y)
         }
     }
+
+    pub fn iter_human(&self) -> IterHuman {
+        self.iter_hierarchy().rev()
+    }
+
+    pub fn iter_hierarchy(&self) -> IterHierarchy {
+        self.0.iter().copied()
+    }
 }
 
-fn parse_with_jumps(s: &mut String, packet: &[u8], mut pos: usize) -> Result<usize, ParseError> {
-    let (mut size, mut jumps) = (0, 0);
+type LabelsPositions = Vec<(usize, usize)>;
+
+fn parse_labels(buff: &[u8], positions: LabelsPositions) -> Result<Name, ParseError> {
+    let mut name = Name::new();
+    for (pos, size) in positions.into_iter().rev() {
+        let label = str::from_utf8(&buff[pos..pos + size]).map_err(CorruptedPackageError::from)?;
+        name.push_label(label);
+    }
+    Ok(name)
+}
+
+fn find_labels(buff: &[u8], pos: usize) -> Result<(LabelsPositions, usize), ParseError> {
+    let blen = buff.len();
+    let mut positions = LabelsPositions::new();
+    let (mut pos, mut size, mut jumps) = (pos, 0, 0);
     loop {
         if jumps > MAX_JUMPS {
             Err(CorruptedPackageError::ExcesiveJumps(jumps))?;
         }
-        match read_label_metadata(packet, pos)? {
+        match read_label_metadata(buff, pos)? {
+            LabelMeta::Size(s) if s > MAX_LABEL_SIZE => Err(CorruptedPackageError::LabelLength(s))?,
+            LabelMeta::Size(s) if blen <= pos + s => Err(CorruptedPackageError::LabelLength(s))?,
             LabelMeta::Pointer(ptr) if ptr >= pos => Err(CorruptedPackageError::InvalidJump)?,
-            LabelMeta::Size(_) if jumps == 0 => {
-                let walked = parse_no_jumps(s, &packet[pos..])?;
-                (pos, size) = (pos + walked, walked);
+            LabelMeta::Size(s) if jumps == 0 => {
+                positions.push((pos + 1, s));
+                pos += s + 1;
+                size += s + 1;
             }
-            LabelMeta::Size(_) => {
-                let walked = parse_no_jumps(s, &packet[pos..])?;
-                pos += walked;
+            LabelMeta::Size(s) => {
+                positions.push((pos + 1, s));
+                pos += s + 1;
             }
             LabelMeta::Pointer(ptr) if jumps == 0 => {
                 (pos, size, jumps) = (ptr, size + 2, jumps + 1);
             }
             LabelMeta::Pointer(ptr) => (pos, jumps) = (ptr, jumps + 1),
-            LabelMeta::End if jumps == 0 => return Ok(size + 1),
-            LabelMeta::End => return Ok(size),
-        }
-    }
-}
-
-fn parse_no_jumps(s: &mut String, buff: &[u8]) -> Result<usize, ParseError> {
-    let mut walked = 0;
-    loop {
-        match read_label_metadata(buff, walked)? {
-            LabelMeta::Size(b) if b > MAX_LABEL_SIZE => Err(CorruptedPackageError::LabelLength(b))?,
-            LabelMeta::Size(b) if buff.len() <= walked + b => {
-                Err(CorruptedPackageError::LabelLength(b))?
-            }
-            LabelMeta::Size(b) => {
-                let i = walked + 1;
-                walked += b + 1;
-                let label =
-                    str::from_utf8(&buff[i..walked]).map_err(CorruptedPackageError::from)?;
-                s.push_str(label);
-                s.push('.');
-            }
-            LabelMeta::Pointer(_) => return Ok(walked),
-            LabelMeta::End => return Ok(walked),
+            LabelMeta::End if jumps == 0 => return Ok((positions, size + 1)),
+            LabelMeta::End => return Ok((positions, size)),
         }
     }
 }
@@ -110,49 +168,155 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_jumps_easy() {
+    fn find_position_no_jumps() {
         let buff = [
-            5, 104, 101, 108, 108, 111, 5, 119, 111, 114, 108, 100, 3, 99, 111, 109, 0, 1, 0, 0,
+            5, 104, 101, 108, 108, 111, // hello
+            5, 119, 111, 114, 108, 100, // world
+            3, 99, 111, 109, // com
+            0, 1, 1, 1, // <end>
         ];
-        let mut s = String::with_capacity(16);
-        let n = parse_no_jumps(&mut s, &buff[..]).unwrap();
-        assert_eq!(n, 16);
-        assert_eq!(s, "hello.world.com.".to_string())
-    }
-
-    #[test]
-    fn no_jumps_hard() {
-        let buff = [
-            5, 104, 101, 108, 108, 111, 5, 119, 111, 114, 108, 100, 3, 99, 111, 109, 0, 1, 0, 0,
-        ];
-        let mut s = String::with_capacity(16);
-        let n = parse_with_jumps(&mut s, &buff[..], 0).unwrap();
+        let (positions, n) = find_labels(&buff[..], 0).unwrap();
         assert_eq!(n, 17);
-        assert_eq!(s, "hello.world.com.".to_string())
+        assert_eq!(positions, vec![(1, 5), (7, 5), (13, 3)])
     }
 
     #[test]
-    fn with_jumps_hard() {
+    fn find_position_with_jumps() {
         let buff = [
-            5, 119, 111, 114, 108, 100, 3, 99, 111, 109, 0, 1, 1, 1, 5, 104, 101, 108, 108, 111,
-            192, 0, 1, 1, 1, 1, 1, 1,
+            5, 119, 111, 114, 108, 100, // world
+            3, 99, 111, 109, // com
+            0, 1, 1, 1, // <end>
+            5, 104, 101, 108, 108, 111, // hello
+            192, 0, 1, 1, 1, 1, 1, 1, // <jump to 0>
         ];
-        let mut s = String::with_capacity(14);
-        let n = parse_with_jumps(&mut s, &buff[..], 14).unwrap();
+        let (positions, n) = find_labels(&buff[..], 14).unwrap();
         assert_eq!(n, 8);
-        assert_eq!(s, "hello.world.com.".to_string())
+        assert_eq!(positions, vec![(15, 5), (1, 5), (7, 3)])
     }
+
     #[test]
-    fn not_allow_forward_jump() {
+    fn no_jumps() {
         let buff = [
-            5, 104, 101, 108, 108, 111, 192, 10, 1, 0, 5, 119, 111, 114, 108, 100, 3, 99, 111, 109,
-            0, 0, 0, 0,
+            5, 104, 101, 108, 108, 111, // hello
+            5, 119, 111, 114, 108, 100, // world
+            3, 99, 111, 109, // com
+            0, 1, 1, 1, // <end>
         ];
-        let mut s = String::with_capacity(16);
-        match parse_with_jumps(&mut s, &buff[..], 0) {
-            Ok(_) => panic!("Buffer with forward jump has been allowed"),
-            Err(ParseError::CorruptPackage(e)) => assert_eq!(e, CorruptedPackageError::InvalidJump),
-            _ => panic!("Did not give back appropiate error"),
-        }
+        let (positions, n) = find_labels(&buff[..], 0).unwrap();
+        let name = parse_labels(&buff[..], positions).unwrap();
+        assert_eq!(n, 17);
+        assert_eq!(name.to_string(), "hello.world.com.".to_string())
+    }
+
+    #[test]
+    fn with_jumps() {
+        let buff = [
+            5, 119, 111, 114, 108, 100, // world
+            3, 99, 111, 109, // com
+            0, 1, 1, 1, // <end>
+            5, 104, 101, 108, 108, 111, // hello
+            192, 0, 1, 1, 1, 1, 1, 1, // <jump to 0>
+        ];
+        let (positions, n) = find_labels(&buff[..], 14).unwrap();
+        let name = parse_labels(&buff[..], positions).unwrap();
+        assert_eq!(n, 8);
+        assert_eq!(name.to_string(), "hello.world.com.".to_string())
+    }
+
+    #[test]
+    fn name_parse_with_jumps() {
+        let buff = [
+            5, 119, 111, 114, 108, 100, // world
+            3, 99, 111, 109, // com
+            0, 1, 1, 1, // <end>
+            5, 104, 101, 108, 108, 111, // hello
+            192, 0, 1, 1, 1, 1, 1, 1, // <jump to 0>
+        ];
+        let (name, n) = Name::parse(&buff[..], 14).unwrap();
+        assert_eq!(n, 8);
+        assert_eq!(name.to_string(), "hello.world.com.".to_string())
+    }
+
+    #[test]
+    fn serialize() {
+        let buff = [
+            5, 104, 101, 108, 108, 111, // hello
+            5, 119, 111, 114, 108, 100, // world
+            3, 99, 111, 109, // com
+            0, 1, 1, 1, // <end>
+        ];
+        let (name, _) = Name::parse(&buff[..], 0).unwrap();
+        assert_eq!(name.to_string(), "hello.world.com.".to_string());
+        let out: Vec<u8> = name.into();
+        assert_eq!(&buff[..17], &out[..17])
+    }
+
+    #[test]
+    fn get_tld() {
+        let mut name = Name::new();
+        name.push_label("com");
+        name.push_label("world");
+        name.push_label("hello");
+
+        let tld = name.tld();
+        assert_eq!(tld, Some("com"));
+    }
+
+    #[test]
+    fn add_str_subdomain() {
+        let buff = [5, 119, 111, 114, 108, 100, 3, 99, 111, 109, 0, 1, 1, 1]; // world.com
+        let (mut name, _) = Name::parse(&buff[..], 0).unwrap();
+        name.push_label("hello");
+        assert_eq!(name.to_string(), "hello.world.com.".to_string())
+    }
+
+    #[test]
+    fn add_string_subdomain() {
+        let sub = String::from("hello");
+        let buff = [5, 119, 111, 114, 108, 100, 3, 99, 111, 109, 0, 1, 1, 1]; // world.com
+        let (mut name, _) = Name::parse(&buff[..], 0).unwrap();
+        name.push_label(&sub[..]);
+        assert_eq!(name.to_string(), "hello.world.com.".to_string())
+    }
+
+    #[test]
+    fn iterate_human() {
+        let mut name = Name::new();
+        name.push_label("com");
+        name.push_label("world");
+        name.push_label("hello");
+
+        let mut human = name.iter_human();
+        assert_eq!(human.next(), Some("hello"));
+        assert_eq!(human.next(), Some("world"));
+        assert_eq!(human.next(), Some("com"));
+    }
+
+    #[test]
+    fn iterate_hierarchy() {
+        let mut name = Name::new();
+        name.push_label("com");
+        name.push_label("world");
+        name.push_label("hello");
+
+        let mut human = name.iter_hierarchy();
+        assert_eq!(human.next(), Some("com"));
+        assert_eq!(human.next(), Some("world"));
+        assert_eq!(human.next(), Some("hello"));
+    }
+
+    #[test]
+    fn check_subdomain() {
+        let mut parent = Name::new();
+        parent.push_label("com");
+        parent.push_label("world");
+
+        let mut sub = Name::new();
+        sub.push_label("com");
+        sub.push_label("world");
+        sub.push_label("hello");
+
+        assert!(parent.is_subdomain(&sub));
+        assert!(!sub.is_subdomain(&parent));
     }
 }

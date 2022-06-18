@@ -131,6 +131,25 @@ impl TryFrom<&[u8]> for DnsHeader {
     }
 }
 
+impl From<&DnsHeader> for Vec<u8> {
+    fn from(header: &DnsHeader) -> Self {
+        let mut target = Vec::with_capacity(12);
+        header.serialize(&mut target);
+        target
+    }
+}
+
+impl DnsHeader {
+    pub fn serialize(&self, target: &mut Vec<u8>) {
+        push_u16(target, self.id);
+        push_u16(target, self.flags.into());
+        push_u16(target, self.questions);
+        push_u16(target, self.answers);
+        push_u16(target, self.authority);
+        push_u16(target, self.additional);
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Flags {
     pub qr: QueryResponse,
@@ -254,6 +273,27 @@ u16_flag_reserved! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn serialize_header() {
+        let mut used = Vec::with_capacity(12);
+        let initial = vec![
+            0x12u8, 0x34u8, 0u8, 0u8, 0u8, 1u8, 0u8, 2u8, 0u8, 3u8, 0u8, 4u8,
+        ];
+        let header = DnsHeader::try_from(&initial[..]).unwrap();
+        header.serialize(&mut used);
+        assert_eq!(initial, used);
+    }
+
+    #[test]
+    fn serialize_from_header() {
+        let initial = vec![
+            0x12u8, 0x34u8, 0u8, 0u8, 0u8, 1u8, 0u8, 2u8, 0u8, 3u8, 0u8, 4u8,
+        ];
+        let header = DnsHeader::try_from(&initial[..]).unwrap();
+        let used = Vec::<u8>::from(&header);
+        assert_eq!(initial, used);
+    }
 
     #[test]
     fn parse_header() {

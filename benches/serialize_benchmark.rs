@@ -10,24 +10,28 @@ use pprof::criterion::{Output, PProfProfiler};
 const REQ: &'static [u8; 33] = include_bytes!("../assets/dns_request.bin");
 const RES: &'static [u8; 49] = include_bytes!("../assets/dns_response.bin");
 
-pub fn parse_request(c: &mut Criterion) {
-    c.bench_function("parse_req", |b| {
-        b.iter(|| DnsPacket::try_from(black_box(&REQ[..])).unwrap())
+pub fn serialize_request(c: &mut Criterion) {
+    let req = DnsPacket::try_from(&REQ[..]).unwrap();
+    let req = &req;
+    c.bench_function("serialize_req", |b| {
+        b.iter(|| Vec::<u8>::from(black_box(req)))
     });
 }
 
-pub fn parse_response(c: &mut Criterion) {
-    c.bench_function("parse_res", |b| {
-        b.iter(|| DnsPacket::try_from(black_box(&RES[..])).unwrap())
+pub fn serialize_response(c: &mut Criterion) {
+    let res = DnsPacket::try_from(&RES[..]).unwrap();
+    let res = &res;
+    c.bench_function("serialize_req", |b| {
+        b.iter(move || Vec::<u8>::from(black_box(res)))
     });
 }
 
 criterion_group!(
-    name = parse;
+    name = serialize;
     config = Criterion::default()
             .with_profiler(
                 PProfProfiler::new(100, Output::Flamegraph(None))
             );
-    targets = parse_request, parse_response
+    targets = serialize_request, serialize_response
 );
-criterion_main!(parse);
+criterion_main!(serialize);

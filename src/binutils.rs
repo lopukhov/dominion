@@ -41,3 +41,13 @@ pub(crate) fn safe_ipv4_read(buff: &[u8], pos: usize) -> Result<Ipv4Addr, Corrup
     let bytes = safe_read::<4>(buff, pos)?;
     Ok(Ipv4Addr::from(bytes))
 }
+
+#[inline]
+pub(crate) fn push_u16(target: &mut Vec<u8>, n: u16) {
+    target.extend(n.to_be_bytes());
+}
+
+#[inline]
+pub(crate) fn push_i32(target: &mut Vec<u8>, n: i32) {
+    target.extend(n.to_be_bytes());
+}

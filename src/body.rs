@@ -10,15 +10,26 @@ use crate::NotImplementedError;
 use crate::ParseError;
 use std::net::Ipv4Addr;
 
+const INIT_RR_SIZE: usize = 64;
+
 #[derive(Clone, Debug)]
-pub struct Question {
-    pub name: Name,
+pub struct Question<'a> {
+    pub name: Name<'a>,
     pub rrtype: QType,
     pub class: Class,
 }
 
-impl Question {
-    pub(crate) fn parse(buff: &[u8], start: usize) -> Result<(Self, usize), crate::ParseError> {
+impl From<Question<'_>> for Vec<u8> {
+    fn from(question: Question<'_>) -> Self {
+        let mut out = question.name.into();
+        push_u16(&mut out, question.rrtype as _);
+        push_u16(&mut out, question.class as _);
+        out
+    }
+}
+
+impl<'a> Question<'a> {
+    pub fn parse(buff: &'a [u8], start: usize) -> Result<(Self, usize), crate::ParseError> {
         let (name, size) = Name::parse(buff, start)?;
         let n = start + size;
         Ok((
@@ -30,35 +41,53 @@ impl Question {
             size + 4,
         ))
     }
+
+    pub fn serialize(&self, packet: &mut Vec<u8>) {
+        self.name.serialize(packet);
+        push_u16(packet, self.rrtype as _);
+        push_u16(packet, self.class as _);
+    }
 }
 
-#[non_exhaustive]
 #[derive(Debug, Clone)]
-pub struct ResourceRecords {
-    pub preamble: RecordPreamble,
-    pub data: RecordData,
+pub struct ResourceRecord<'a> {
+    pub preamble: RecordPreamble<'a>,
+    pub data: RecordData<'a>,
 }
 
-impl ResourceRecords {
-    pub fn parse(buff: &[u8], pos: usize) -> Result<(Self, usize), ParseError> {
+impl From<ResourceRecord<'_>> for Vec<u8> {
+    fn from(rr: ResourceRecord<'_>) -> Self {
+        let mut out = Vec::with_capacity(INIT_RR_SIZE);
+        rr.serialize(&mut out);
+        out
+    }
+}
+
+impl<'a> ResourceRecord<'a> {
+    pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (preamble, size) = RecordPreamble::parse(buff, pos)?;
         let data = RecordData::parse(buff, pos + size, preamble.rrtype)?;
         let size = size + preamble.rdlen as usize;
         Ok((Self { preamble, data }, size))
     }
+
+    pub fn serialize(&self, packet: &mut Vec<u8>) {
+        self.preamble.serialize(packet);
+        self.data.serialize(packet);
+    }
 }
 
 #[derive(Debug, Clone)]
-pub struct RecordPreamble {
-    pub name: Name,
+pub struct RecordPreamble<'a> {
+    pub name: Name<'a>,
     pub rrtype: QType,
     pub class: Class,
     pub ttl: i32,
     pub rdlen: u16,
 }
 
-impl RecordPreamble {
-    fn parse(buff: &[u8], pos: usize) -> Result<(Self, usize), ParseError> {
+impl<'a> RecordPreamble<'a> {
+    fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (name, size) = Name::parse(buff, pos)?;
         let n = size + pos;
         Ok((
@@ -72,19 +101,27 @@ impl RecordPreamble {
             size + 10,
         ))
     }
+
+    fn serialize(&self, packet: &mut Vec<u8>) {
+        self.name.serialize(packet);
+        push_u16(packet, self.rrtype as _);
+        push_u16(packet, self.class as _);
+        push_i32(packet, self.ttl);
+        push_u16(packet, self.rdlen);
+    }
 }
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
-pub enum RecordData {
+pub enum RecordData<'a> {
     A(Ipv4Addr),
-    Ns(Name),
-    Cname(Name),
-    Mx { preference: u16, exchange: Name },
+    Ns(Name<'a>),
+    Cname(Name<'a>),
+    Mx { preference: u16, exchange: Name<'a> },
 }
 
-impl RecordData {
-    pub(crate) fn parse(buff: &[u8], pos: usize, rrtype: QType) -> Result<Self, ParseError> {
+impl<'a> RecordData<'a> {
+    fn parse(buff: &'a [u8], pos: usize, rrtype: QType) -> Result<Self, ParseError> {
         match rrtype {
             QType::A => Ok(Self::A(safe_ipv4_read(buff, pos)?)),
             QType::Ns => {
@@ -103,6 +140,21 @@ impl RecordData {
                 })
             }
             QType::All => Err(NotImplementedError::RecordType(rrtype as _))?,
+        }
+    }
+
+    fn serialize(&self, packet: &mut Vec<u8>) {
+        match self {
+            Self::A(ip) => packet.extend(ip.octets()),
+            Self::Ns(name) => name.serialize(packet),
+            Self::Cname(name) => name.serialize(packet),
+            Self::Mx {
+                preference,
+                exchange,
+            } => {
+                push_u16(packet, *preference);
+                exchange.serialize(packet);
+            }
         }
     }
 }
