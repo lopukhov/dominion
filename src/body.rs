@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-pub(crate) mod name;
+/// Domain name structure and funtions
+pub mod name;
 
 use crate::binutils::*;
 use crate::body::name::Name;
@@ -12,10 +13,26 @@ use std::net::Ipv4Addr;
 
 const INIT_RR_SIZE: usize = 64;
 
+/// A query for a [ResourceRecord] of the specified [QType] and [Class].
+///
+/// ```text
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///    |                                               |
+///    /                     QNAME                     /
+///    /                                               /
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///    |                     QTYPE                     |
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///    |                     QCLASS                    |
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+/// ```
 #[derive(Clone, Debug)]
 pub struct Question<'a> {
+    /// The domain name to be queried
     pub name: Name<'a>,
+    /// The type of [ResourceRecord] being queried
     pub rrtype: QType,
+    /// The class of [ResourceRecord] being queried
     pub class: Class,
 }
 
@@ -29,6 +46,13 @@ impl From<Question<'_>> for Vec<u8> {
 }
 
 impl<'a> Question<'a> {
+    /// Parse from the specified `buff`, starting at position `start`.
+    ///
+    /// # Errors
+    ///
+    /// It will error if the buffer does not contain a valid question. If the domain name
+    /// in the question has been compressed the buffer should include all previous bytes from
+    /// the DNS packet to be considered valid.
     pub fn parse(buff: &'a [u8], start: usize) -> Result<(Self, usize), crate::ParseError> {
         let (name, size) = Name::parse(buff, start)?;
         let n = start + size;
@@ -42,6 +66,7 @@ impl<'a> Question<'a> {
         ))
     }
 
+    /// Serialize the [Question] and append it tho the end of the provided `packet`
     pub fn serialize(&self, packet: &mut Vec<u8>) {
         self.name.serialize(packet);
         push_u16(packet, self.rrtype as _);
@@ -49,9 +74,35 @@ impl<'a> Question<'a> {
     }
 }
 
+/// A description of a resource that can be used as an answer to a question
+/// or to provide additional information in the `authority` or `additional` fields
+/// of a DNS packet.
+///
+/// ```text
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///    |                                               |
+///    /                                               /
+///    /                      NAME                     /
+///    |                                               |
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///    |                      TYPE                     |
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///    |                     CLASS                     |
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///    |                      TTL                      |
+///    |                                               |
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///    |                   RDLENGTH                    |
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
+///    /                     RDATA                     /
+///    /                                               /
+///    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+/// ```
 #[derive(Debug, Clone)]
 pub struct ResourceRecord<'a> {
+    /// Contains general information that every [ResourceRecord] shares, like type or class.
     pub preamble: RecordPreamble<'a>,
+    /// The RDATA section of a resource record in some DNS packet.
     pub data: RecordData<'a>,
 }
 
@@ -64,6 +115,7 @@ impl From<ResourceRecord<'_>> for Vec<u8> {
 }
 
 impl<'a> ResourceRecord<'a> {
+    /// Parse from the specified `buff`, starting at position `pos`.
     pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (preamble, size) = RecordPreamble::parse(buff, pos)?;
         let data = RecordData::parse(buff, pos + size, preamble.rrtype)?;
@@ -71,18 +123,25 @@ impl<'a> ResourceRecord<'a> {
         Ok((Self { preamble, data }, size))
     }
 
+    /// Serialize the [ResourceRecord] and append it tho the end of the provided `packet`
     pub fn serialize(&self, packet: &mut Vec<u8>) {
         self.preamble.serialize(packet);
         self.data.serialize(packet);
     }
 }
 
+/// The [ResourceRecord] preamble. Common data to all resource record types.
 #[derive(Debug, Clone)]
 pub struct RecordPreamble<'a> {
+    /// The domain name the RR refers to.
     pub name: Name<'a>,
+    /// The RR type.
     pub rrtype: QType,
+    /// The RR class.
     pub class: Class,
+    /// The time interval that the resource record may be cached before the source of the information should again be consulted.
     pub ttl: i32,
+    /// The length of the RR data.
     pub rdlen: u16,
 }
 
@@ -111,13 +170,23 @@ impl<'a> RecordPreamble<'a> {
     }
 }
 
+/// The [ResourceRecord] data associated with the corresponding [Name].
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum RecordData<'a> {
+    /// A host address.
     A(Ipv4Addr),
+    /// An authoritative name server
     Ns(Name<'a>),
+    /// The canonical name for an alias.
     Cname(Name<'a>),
-    Mx { preference: u16, exchange: Name<'a> },
+    /// Mail exchange.
+    Mx {
+        /// The preference given to this RR among others at the same owner.
+        preference: u16,
+        /// A host willing to act as a mail exchange for the owner name.
+        exchange: Name<'a>,
+    },
 }
 
 impl<'a> RecordData<'a> {
@@ -159,13 +228,19 @@ impl<'a> RecordData<'a> {
     }
 }
 
+/// The type of [Question] or [ResourceRecord].
 #[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub enum QType {
+    /// A host address (IPv4)
     A = 1,
+    /// An authoritative name server
     Ns = 2,
+    /// The canonical name for an alias
     Cname = 5,
+    /// A mail exchange
     Mx = 15,
+    /// All types
     All = 255,
 }
 
@@ -184,13 +259,22 @@ impl TryFrom<u16> for QType {
     }
 }
 
+/// An enumeration of the different available DNS Classes.
+///
+/// In practice should allways be `Class::IN`, but the rest are included for completeness.
+/// The enum is `non_exhaustive` because classes may be added in the future.
 #[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub enum Class {
+    /// IN: the Internet
     IN = 1,
+    /// CS: the CSNET class (Obsolete)
     CS = 2,
+    /// CH: the CHAOS class
     CH = 3,
+    /// HS: Hesiod [Dyer 87]
     HS = 4,
+    /// *: any class
     Any = 255,
 }
 

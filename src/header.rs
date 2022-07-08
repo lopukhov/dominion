@@ -3,14 +3,24 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::binutils::*;
-use crate::CorruptedPackageError;
+use crate::CorruptedPacketError;
 use crate::NotImplementedError;
 
 macro_rules! u16_flag {
-    ($bits:literal is $typ:tt with: $($variant:tt = $value:literal)+) => {
+    (
+        $(#[$outer:meta])*
+        $bits:literal is $typ:tt with: $(
+            #[$inner:meta]
+            $variant:tt = $value:literal
+        )+
+    ) => {
+        $(#[$outer])*
         #[derive(Copy, Clone, Debug, PartialEq, Eq)]
         pub enum $typ {
-            $($variant = $value,)*
+            $(
+                #[$inner]
+                $variant = $value,
+            )*
         }
 
         impl From<u16> for $typ {
@@ -33,11 +43,21 @@ macro_rules! u16_flag {
 }
 
 macro_rules! u16_flag_reserved {
-    ($bits:literal is $typ:tt with: $($variant:tt = $value:literal)+) => {
+    (
+        $(#[$outer:meta])*
+        $bits:literal is $typ:tt with: $(
+            #[$inner:meta]
+            $variant:tt = $value:literal
+        )+
+    ) => {
+        $(#[$outer])*
         #[non_exhaustive]
         #[derive(Copy, Clone, Debug, PartialEq, Eq)]
         pub enum $typ {
-            $($variant = $value,)*
+            $(
+                #[$inner]
+                $variant = $value,
+            )*
         }
 
         impl TryFrom<u16> for $typ {
@@ -71,43 +91,55 @@ fn unshift(mask: u16, n: u16) -> u16 {
     n << mask.trailing_zeros()
 }
 
-//
-//       0  1  2  3  4  5  6  7  0  1  2  3  4  5  6  7
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                      ID                       |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |QR|   Opcode  |AA|TC|RD|RA| Z|AD|CD|   RCODE   |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    QDCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    ANCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    NSCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//     |                    ARCOUNT                    |
-//     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-//
-// ID: Random identifier of connnection
-// QR: Query (0) or Response (1)
-// OPCODE: Standard query (0), Inverse query (1), Server status query (2), Notify (4), Update (5), DSO (6)
-// AA: Authoritative Answer
-// TC: TrunCation
-// RD: Recursion Desired
-// RA: Recursion Available
-// Z: Zero (reserved)
-// RCODE: Response code NOERROR (0), FORMERR (1), SERVFAIL (2), NXDOMAIN (3), NOTIMP (4), REFUSED (5)
-// QDCOUNT: Question records count
-// ANCOUNT: Answer records count
-// NSCOUNT: Name server records count
-// ARCOUNT: Aditional records count
-//
+/// A DNS header.
+///
+/// The header of a DNS packet follows the following structure:
+///
+/// ```text
+///       0  1  2  3  4  5  6  7  0  1  2  3  4  5  6  7
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                      ID                       |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |QR|   Opcode  |AA|TC|RD|RA| Z|AD|CD|   RCODE   |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                    QDCOUNT                    |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                    ANCOUNT                    |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                    NSCOUNT                    |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                    ARCOUNT                    |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///
+/// ID: Random identifier of connnection
+/// QR: Query (0) or Response (1)
+/// OPCODE: Standard query (0), Inverse query (1), Server status query (2), Notify (4), Update (5), DSO (6)
+/// AA: Authoritative Answer
+/// TC: TrunCation
+/// RD: Recursion Desired
+/// RA: Recursion Available
+/// Z: Zero (reserved)
+/// AD: Authentic data (for DNSSEC)
+/// AD: Checking disabled (for DNSSEC)
+/// RCODE: Response code NOERROR (0), FORMERR (1), SERVFAIL (2), NXDOMAIN (3), NOTIMP (4), REFUSED (5)
+/// QDCOUNT: Question records count
+/// ANCOUNT: Answer records count
+/// NSCOUNT: Name server records count
+/// ARCOUNT: Aditional records count
+/// ```
 #[derive(Clone, Debug)]
 pub struct DnsHeader {
+    /// Random identifier of connnection
     pub id: u16,
+    /// The different flags of a DNS header.
     pub flags: Flags,
+    /// Question records count
     pub questions: u16,
+    /// Answer records count
     pub answers: u16,
+    /// Name server records count
     pub authority: u16,
+    /// Aditional records count
     pub additional: u16,
 }
 
@@ -116,7 +148,7 @@ impl TryFrom<&[u8]> for DnsHeader {
     #[inline]
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         if bytes.len() < 12 {
-            Err(CorruptedPackageError::HeaderLength(bytes.len()))?
+            Err(CorruptedPacketError::HeaderLength(bytes.len()))?
         } else {
             let header = DnsHeader {
                 id: safe_u16_read(bytes, 0)?,
@@ -140,6 +172,11 @@ impl From<&DnsHeader> for Vec<u8> {
 }
 
 impl DnsHeader {
+    /// Serialize a [DnsHeader] into a vector of bytes.
+    ///
+    /// Usefult when you need to be able to apend the bytes to an existing `Vec<u8`,
+    /// in any other case the `From` trait is implemented to be able to convert from an
+    /// [DnsHeader] to an `Vec<u8>`.
     pub fn serialize(&self, target: &mut Vec<u8>) {
         push_u16(target, self.id);
         push_u16(target, self.flags.into());
@@ -150,17 +187,44 @@ impl DnsHeader {
     }
 }
 
+/// DNS Flags
+///
+/// ```text
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |QR|   Opcode  |AA|TC|RD|RA| Z|AD|CD|   RCODE   |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+/// QR: Query (0) or Response (1)
+/// OPCODE: Standard query (0), Inverse query (1), Server status query (2), Notify (4), Update (5), DSO (6)
+/// AA: Authoritative Answer
+/// TC: TrunCation
+/// RD: Recursion Desired
+/// RA: Recursion Available
+/// Z: Zero (reserved)
+/// AD: Authentic data (for DNSSEC)
+/// AD: Checking disabled (for DNSSEC)
+/// RCODE: Response code NOERROR (0), FORMERR (1), SERVFAIL (2), NXDOMAIN (3), NOTIMP (4), REFUSED (5)
+/// ```
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Flags {
+    /// Query (0) or Response (1)
     pub qr: QueryResponse,
+    /// Standard query (0), Inverse query (1), Server status query (2), Notify (4), Update (5), DSO (6)
     pub opcode: OpCode,
+    /// The answer is authoritative.
     pub aa: AuthoritativeAnswer,
+    /// The packet has been truncated.
     pub tc: TrunCation,
+    /// The client desires recursion.
     pub rd: RecursionDesired,
+    /// The server has recursion availbale.
     pub ra: RecursionAvailable,
+    /// Reserved (has to be 0).
     pub z: Zero,
+    /// Authentic data (for DNSSEC)
     pub ad: AuthenticData,
+    /// Checking disabled (for DNSSEC)
     pub cd: CheckingDisabled,
+    /// Response code NOERROR (0), FORMERR (1), SERVFAIL (2), NXDOMAIN (3), NOTIMP (4), REFUSED (5)
     pub rcode: ResponseCode,
 }
 
@@ -201,72 +265,110 @@ impl From<Flags> for u16 {
 }
 
 u16_flag! {
+    /// Query (0) or Response (1) packet.
     0b1000000000000000 is QueryResponse with:
+        /// Query packet
         Query = 0
+        /// Response packet
         Response = 1
 }
 
 // TODO: Not exaustive. https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml
 u16_flag_reserved! {
+    /// Standard query (0), Inverse query (1), Server status query (2), Notify (4), Update (5), DSO (6)
     0b0111100000000000 is OpCode with:
+        /// Standard query
         Query = 0
+        /// Inverse query
         Iquery = 1
+        /// Server status query
         Status = 2
+        /// Notify
         Notify = 4
+        /// Update
         Update = 5
+        /// DSO
         Dso = 6
 }
 
 u16_flag! {
+    /// Flag to indicate if the answer is authoritative
     0b0000010000000000 is AuthoritativeAnswer with:
+        /// The answer is not authoritative
         NonAuthoritative = 0
+        /// The answer is authoritative
         Authoritative = 1
 }
 
 u16_flag! {
+    /// Flag to indicate if the packet has been truncated.
     0b0000001000000000 is TrunCation with:
+        /// The packet has not been truncated
         NotTruncated = 0
+        /// The packet has been truncated
         Truncated = 1
 }
 
 u16_flag! {
+    /// Flag to indicate if recursion is desired by the client.
     0b0000000100000000 is RecursionDesired with:
+        /// Recursion is not desired
         NotDesired = 0
+        /// Recursion is desired
         Desired = 1
 }
 
 u16_flag! {
+    /// Flag to indicate if recursion is available by the server.
     0b0000000010000000 is RecursionAvailable with:
+        /// Recursion is not available
         NotAvailable = 0
+        /// Recursion is available
         Available = 1
 }
 
 u16_flag! {
+    /// Reserved, should be 0.
     0b0000000001000000 is Zero with:
+        /// Standard value
         Zero = 0
+        /// Not used value.
         Reserved = 1
 }
 
 u16_flag! {
+    /// DNSSEC flag to indicate if the data has been cryptographically authenticated
     0b0000000000100000 is AuthenticData with:
+        /// The data is not cryptographically authenticated
         NotAuthentic = 0
+        /// The data is cryptographically authenticated
         Authentic = 1
 }
 
 u16_flag! {
+    /// DNSSEC flag to indicate if the client has enabled checking of the data.
     0b0000000000010000 is CheckingDisabled with:
+        /// Checking has been enabled
         Enabled = 0
+        /// Checking has been disabled
         Disabled = 1
 }
 
 // TODO: Not exaustive. https://www.iana.org/assignments/dns-parameters/dns-parameters.xhtml#dns-parameters-6
 u16_flag_reserved! {
+    /// Response code
     0b0000000000001111 is ResponseCode with:
+        /// There was no error.
         NoError = 0
+        /// Format error - The name server was unable to interpret the query.
         FormErr = 1
+        /// Server failure - The name server was unable to process this query due to a problem with the name server.
         ServFail = 2
+        /// Name Error - Meaningful only for responses from an authoritative name server, this code signifies that the domain name referenced in the query does not exist.
         NXDomain = 3
+        /// Not Implemented - The name server does not support the requested kind of query.
         NotImp = 4
+        /// Refused - The name server refuses to perform the specified operation for policy reasons.  For example, a name server may not wish to provide the information to the particular requester, or a name server may not wish to perform a particular operation
         Refused = 5
 }
 

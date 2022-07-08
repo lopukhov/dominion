@@ -2,8 +2,68 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! # Dominion Parser
+//! dominion-parser is a DNS parser with a focus on usage of the type system
+//! to create a declarative experience when parsing or serializing DNS packets.
+//! It allows parsing and serializing whole packets or individual elements, like
+//! the header, or the different questions and resource records. Not all resource
+//! records have been implemented, if some are missing that are relevant for your
+//! use case please open an [issue](https://github.com/lopukhov/dominion/issues).
+//!
+//! ## Parsing
+//! ```rust
+//!
+//! use dominion_parser::DnsPacket;
+//!
+//! const REQ: &'static [u8; 33] = include_bytes!("../assets/dns_request.bin");
+//!
+//! fn main() {
+//!     let packet = DnsPacket::try_from(&REQ[..]).unwrap();
+//!     println!("The request was:");
+//!     println!("{:#?}", packet);
+//! }
+//! ```
+//!
+//! Parsing can fail with a [ParseError].
+//!
+//! ## Serializing
+//! ```rust
+//! use dominion_parser::body::{RecordData, RecordPreamble, ResourceRecord};
+//! use dominion_parser::header::{AuthenticData, QueryResponse, RecursionAvailable};
+//! use dominion_parser::DnsPacket;
+//!
+//! const REQ: &'static [u8; 33] = include_bytes!("../assets/dns_request.bin");
+//!
+//! fn main() {
+//!     let mut res = DnsPacket::try_from(&REQ[..]).unwrap();
+//!
+//!     // Change some flags
+//!     res.header.flags.qr = QueryResponse::Response;
+//!     res.header.flags.ra = RecursionAvailable::Available;
+//!     res.header.flags.ad = AuthenticData::NotAuthentic;
+//!
+//!     // Add answer
+//!     let preamble = RecordPreamble {
+//!         name: res.questions[0].name.clone(),
+//!         rrtype: res.questions[0].rrtype,
+//!         class: res.questions[0].class,
+//!         ttl: 300,
+//!         rdlen: 4,
+//!     };
+//!     let data = RecordData::A("204.74.99.100".parse().unwrap());
+//!     let answer = ResourceRecord { preamble, data };
+//!     res.header.answers = 1;
+//!     res.answers.push(answer);
+//!
+//!     let res = Vec::<u8>::from(&res);
+//!
+//!     println!("=================== My Response ===================");
+//!     println!("{:?}", res);
+//! }
+//! ```
+
 #![forbid(unsafe_code)]
-// #![warn(missing_docs)]
+#![warn(missing_docs)]
 
 use thiserror::Error;
 
@@ -12,26 +72,42 @@ use body::ResourceRecord;
 use header::DnsHeader;
 
 mod binutils;
+/// The body of the DNS packet (Questions and Resource Records)
 pub mod body;
+/// The header of the DNS packet
 pub mod header;
 
-// +---------------------+
-// |        Header       |
-// +---------------------+
-// |       Question      | the question(s) for the name server
-// +---------------------+
-// |        Answer       | RRs answering the question
-// +---------------------+
-// |      Authority      | RRs pointing toward an authority
-// +---------------------+
-// |      Additional     | RRs holding additional information
-// +---------------------+
+/// Represents a complete DNS packet.
+///
+/// A DNS packet has the following sections in order:
+///
+/// ```text
+/// +---------------------+
+/// |        Header       |
+/// +---------------------+
+/// |       Question      | the question(s) for the name server
+/// +---------------------+
+/// |        Answer       | RRs answering the question
+/// +---------------------+
+/// |      Authority      | RRs pointing toward an authority
+/// +---------------------+
+/// |      Additional     | RRs holding additional information
+/// +---------------------+
+/// ```
+///
+/// For the header the [DnsHeader] type is used. For the rest, Questions are represented
+/// with the [Question] type, and RRs with the [ResourceRecord] type.
 #[derive(Debug, Clone)]
 pub struct DnsPacket<'a> {
+    /// The DNS Header
     pub header: DnsHeader,
+    /// The question(s) for the name server
     pub questions: Vec<Question<'a>>,
+    /// Resource Records answering the question(s)
     pub answers: Vec<ResourceRecord<'a>>,
+    /// Resource Records pointing toward a domain authority
     pub authority: Vec<ResourceRecord<'a>>,
+    /// Resource Records holding additional information
     pub additional: Vec<ResourceRecord<'a>>,
 }
 
@@ -94,50 +170,66 @@ impl From<&DnsPacket<'_>> for Vec<u8> {
     }
 }
 
+/// An error was encountered when trying to parse a byte buffer into a DNS packet
 #[derive(Error, Debug)]
 pub enum ParseError {
+    /// The DNS packet contained funcionality that has not yet been implemented.
     #[error("Packet contains behaviour not implemented: {0}")]
     NotImplemented(#[from] NotImplementedError),
+    /// The DNS packet was corrupted or does not conform to the DNS standard(s).
     #[error("Packet has been corruped or does not conform to DNS standard: {0}")]
-    CorruptPackage(#[from] CorruptedPackageError),
+    CorruptPacket(#[from] CorruptedPacketError),
 }
 
+/// The DNS packet contained funcionality that has not yet been implemented.
 #[derive(Error, Debug)]
 pub enum NotImplementedError {
+    /// Some header flag used a value that has not been implemented.
     #[error("Flag {0} has no implementation for value {1} in the current version.")]
     HeaderFlag(&'static str, u16),
+    /// The DNS packet contains a [Question] or a [ResourceRecord] with a [QType][body::QType] that has not yet been implemented.
     #[error("DNS record or query type not implemented with value {0}.")]
     RecordType(u16),
+    /// The DNS packet contains a [Question] or a [ResourceRecord] with a [Class][body::Class] that has not yet been implemented.
     #[error("DNS record or query class not implemented with value {0}.")]
     RecordClass(u16),
+    /// The DNS packet contains a label prefix that is not a length prefix or a pointer. Those values dont have a standard definition so are not implemented.
     #[error("Byte {0:#b} does not have a pointer or length prefix.")]
     LabelPrefix(u8),
 }
 
+/// The provided buffer was not a valid DNS packet or has been corruped (intentionally or not).
 #[derive(Error, Debug, PartialEq)]
-pub enum CorruptedPackageError {
+pub enum CorruptedPacketError {
+    /// The length of the header is too small.
     #[error(
-        "Length of package ({0} bytes) is too small to contain a DNS header (12 bytes in length)."
+        "Length of packet ({0} bytes) is too small to contain a DNS header (12 bytes in length)."
     )]
     HeaderLength(usize),
+    /// One of the labels in the packet has a length that is bigger than the DNS specification.
     #[error(
         "Specified name length ({0}) is too long, is bigger than DNS specification (maximum {}).",
         crate::body::name::MAX_NAME_SIZE
     )]
     NameLength(usize),
-    #[error("Jump points to a section of the package equal or greater than the current position.")]
+    /// There was a jump to a position forward in the packet (it does not follow the specification) or to itself (it is not sound as it would result in a DoS).
+    #[error("Jump points to a section of the packet  equal or greater than the current position.")]
     InvalidJump,
+    /// Some domain name has been compressed with too many jumps. This error may be removed in the future.
     #[error(
         "DNS compression contains excesive number of jumps {0} (maximum {})",
         crate::body::name::MAX_JUMPS
     )]
     ExcesiveJumps(u8),
-    #[error("Specified label length ({0}) is too long, it overflows the rest of the package or is bigger than DNS specification (maximum {}).",
+    /// Some label in the DNS packet it too long, overflowing the packet or not following the DNS specification.
+    #[error("Specified label length ({0}) is too long, it overflows the rest of the packet  or is bigger than DNS specification (maximum {}).",
         crate::body::name::MAX_LABEL_SIZE
     )]
     LabelLength(usize),
+    /// The packet tried to cause an out-of-bound read.
     #[error("Out-of-bounds read attempt at position {0}")]
     OobRead(usize),
+    /// Some label in one of the domain names is not valid UTF-8.
     #[error("Non UTF-8 label: {0}")]
     NonUtf8(#[from] std::str::Utf8Error),
 }

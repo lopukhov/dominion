@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::binutils::*;
-use crate::CorruptedPackageError;
+use crate::CorruptedPacketError;
 use crate::NotImplementedError;
 use crate::ParseError;
 use std::fmt;
@@ -19,6 +19,7 @@ pub(crate) const MAX_JUMPS: u8 = 5;
 pub(crate) const MAX_LABEL_SIZE: usize = 63;
 pub(crate) const MAX_NAME_SIZE: usize = 255;
 
+/// A domain name represented as an inverted list of labels.
 #[derive(Clone)]
 pub struct Name<'a>(Vec<&'a str>);
 
@@ -58,12 +59,20 @@ impl From<Name<'_>> for Vec<u8> {
 }
 
 impl<'a> Name<'a> {
+    /// Parse from the specified `buff`, starting at position `pos`.
+    ///
+    /// # Errors
+    ///
+    /// It will error if the buffer does not contain a valid domain name. If the domain name
+    /// has been compressed the buffer should include all previous bytes from the DNS packet
+    /// to be considered valid. Jump pointers should only point backwards inside the `buf`.
     pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (positions, n) = find_labels(buff, pos)?;
         let name = parse_labels(buff, positions)?;
         Ok((name, n))
     }
 
+    /// Serialize the [Name] and append it tho the end of the provided `packet`
     pub fn serialize(&self, packet: &mut Vec<u8>) {
         for label in self.iter_human() {
             packet.push(label.len() as _);
@@ -72,18 +81,58 @@ impl<'a> Name<'a> {
         packet.push(0u8);
     }
 
+    /// Create a new, empty, domain name.
+    ///
+    /// ```
+    /// # use dominion_parser::body::name::Name;
+    /// let name = Name::new();
+    /// assert_eq!(name.to_string(), "".to_string())
+    /// ```
     pub fn new() -> Self {
         Name(Vec::with_capacity(INIT_NUM_LABELS))
     }
 
+    /// Obtain the top level domain (TLD) of the provided domain name.
+    ///
+    /// ```
+    /// # use dominion_parser::body::name::Name;
+    /// let mut name = Name::new();
+    /// name.push_label("com");
+    /// name.push_label("example");
+    /// assert_eq!(name.tld(), Some("com"))
+    /// ```
     pub fn tld(&self) -> Option<&str> {
         self.0.get(0).copied()
     }
 
+    /// Push a new label to the end of the domain name, as a subdomain of the current one.
+    ///
+    /// ```
+    /// # use dominion_parser::body::name::Name;
+    /// let mut name = Name::new();
+    /// name.push_label("com");
+    /// name.push_label("example");
+    /// assert_eq!(name.to_string(), "example.com.".to_string())
+    /// ```
     pub fn push_label(&mut self, label: &'a str) {
         self.0.push(label);
     }
 
+    /// Check if `sub` is a subdomain of the current domain name.
+    ///
+    /// ```
+    /// # use dominion_parser::body::name::Name;
+    /// let mut name = Name::new();
+    /// name.push_label("com");
+    /// name.push_label("example");
+    ///
+    /// let mut sub = Name::new();
+    /// sub.push_label("com");
+    /// sub.push_label("example");
+    /// sub.push_label("subdomain");
+    ///
+    /// assert!(name.is_subdomain(&sub))
+    /// ```
     pub fn is_subdomain(&self, sub: &Name<'_>) -> bool {
         if self.0.len() > sub.0.len() {
             false
@@ -92,10 +141,38 @@ impl<'a> Name<'a> {
         }
     }
 
+    /// Return an iterator over the labels in human order.
+    ///
+    /// ```
+    /// # use dominion_parser::body::name::Name;
+    /// let mut name = Name::new();
+    /// name.push_label("com");
+    /// name.push_label("example");
+    /// name.push_label("subdomain");
+    /// let mut human = name.iter_human();
+    ///
+    /// assert_eq!(human.next(), Some("subdomain"));
+    /// assert_eq!(human.next(), Some("example"));
+    /// assert_eq!(human.next(), Some("com"));
+    /// ```
     pub fn iter_human(&self) -> IterHuman {
         self.iter_hierarchy().rev()
     }
 
+    /// Return an iterator over the labels in hierarchical order.
+    ///
+    /// ```
+    /// # use dominion_parser::body::name::Name;
+    /// let mut name = Name::new();
+    /// name.push_label("com");
+    /// name.push_label("example");
+    /// name.push_label("subdomain");
+    /// let mut hierarchy = name.iter_hierarchy();
+    ///
+    /// assert_eq!(hierarchy.next(), Some("com"));
+    /// assert_eq!(hierarchy.next(), Some("example"));
+    /// assert_eq!(hierarchy.next(), Some("subdomain"));
+    /// ```
     pub fn iter_hierarchy(&self) -> IterHierarchy {
         self.0.iter().copied()
     }
@@ -106,7 +183,7 @@ type LabelsPositions = Vec<(usize, usize)>;
 fn parse_labels(buff: &[u8], positions: LabelsPositions) -> Result<Name, ParseError> {
     let mut name = Name::new();
     for (pos, size) in positions.into_iter().rev() {
-        let label = str::from_utf8(&buff[pos..pos + size]).map_err(CorruptedPackageError::from)?;
+        let label = str::from_utf8(&buff[pos..pos + size]).map_err(CorruptedPacketError::from)?;
         name.push_label(label);
     }
     Ok(name)
@@ -118,12 +195,12 @@ fn find_labels(buff: &[u8], pos: usize) -> Result<(LabelsPositions, usize), Pars
     let (mut pos, mut size, mut jumps) = (pos, 0, 0);
     loop {
         if jumps > MAX_JUMPS {
-            Err(CorruptedPackageError::ExcesiveJumps(jumps))?;
+            Err(CorruptedPacketError::ExcesiveJumps(jumps))?;
         }
         match read_label_metadata(buff, pos)? {
-            LabelMeta::Size(s) if s > MAX_LABEL_SIZE => Err(CorruptedPackageError::LabelLength(s))?,
-            LabelMeta::Size(s) if blen <= pos + s => Err(CorruptedPackageError::LabelLength(s))?,
-            LabelMeta::Pointer(ptr) if ptr >= pos => Err(CorruptedPackageError::InvalidJump)?,
+            LabelMeta::Size(s) if s > MAX_LABEL_SIZE => Err(CorruptedPacketError::LabelLength(s))?,
+            LabelMeta::Size(s) if blen <= pos + s => Err(CorruptedPacketError::LabelLength(s))?,
+            LabelMeta::Pointer(ptr) if ptr >= pos => Err(CorruptedPacketError::InvalidJump)?,
             LabelMeta::Size(s) if jumps == 0 => {
                 positions.push((pos + 1, s));
                 pos += s + 1;
