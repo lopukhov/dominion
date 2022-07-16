@@ -3,8 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::binutils::*;
-use crate::CorruptedPacketError;
-use crate::NotImplementedError;
+use crate::ParseError;
 
 macro_rules! u16_flag {
     (
@@ -61,13 +60,13 @@ macro_rules! u16_flag_reserved {
         }
 
         impl TryFrom<u16> for $typ {
-            type Error = NotImplementedError;
+            type Error = ParseError;
 
             #[inline]
             fn try_from(n: u16) -> Result<Self, Self::Error> {
                 match $crate::header::mask_shift($bits, n) {
                     $($value => Ok(Self::$variant),)*
-                    n => Err(NotImplementedError::HeaderFlag(stringify!($typ), n)),
+                    n => Err(ParseError::HeaderFlag(stringify!($typ), n)),
                 }
             }
         }
@@ -148,7 +147,7 @@ impl TryFrom<&[u8]> for DnsHeader {
     #[inline]
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         if bytes.len() < 12 {
-            Err(CorruptedPacketError::HeaderLength(bytes.len()))?
+            Err(ParseError::HeaderLength(bytes.len()))?
         } else {
             let header = DnsHeader {
                 id: safe_u16_read(bytes, 0)?,
@@ -164,6 +163,7 @@ impl TryFrom<&[u8]> for DnsHeader {
 }
 
 impl From<&DnsHeader> for Vec<u8> {
+    #[inline]
     fn from(header: &DnsHeader) -> Self {
         let mut target = Vec::with_capacity(12);
         header.serialize(&mut target);
@@ -177,6 +177,7 @@ impl DnsHeader {
     /// Usefult when you need to be able to apend the bytes to an existing `Vec<u8`,
     /// in any other case the `From` trait is implemented to be able to convert from an
     /// [DnsHeader] to an `Vec<u8>`.
+    #[inline]
     pub fn serialize(&self, target: &mut Vec<u8>) {
         push_u16(target, self.id);
         push_u16(target, self.flags.into());
@@ -229,7 +230,7 @@ pub struct Flags {
 }
 
 impl TryFrom<u16> for Flags {
-    type Error = NotImplementedError;
+    type Error = ParseError;
 
     #[inline]
     fn try_from(n: u16) -> Result<Self, Self::Error> {

@@ -3,14 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! # Dominion Parser
-//! dominion-parser is a DNS parser with a focus on usage of the type system
-//! to create a declarative experience when parsing or serializing DNS packets.
-//! It allows parsing and serializing whole packets or individual elements, like
-//! the header, or the different questions and resource records. Not all resource
-//! records have been implemented, if some are missing that are relevant for your
-//! use case please open an [issue](https://github.com/lopukhov/dominion/issues).
+//!
+//! DNS parser with a focus on usage of the type system to create a declarative
+//! experience when parsing or serializing DNS packets. It allows parsing and serializing
+//! whole packets or individual elements, like the header or the different questions and
+//! resource records. Not all resource records have been implemented, if some are missing
+//! that are relevant for your use case please open an [issue](https://github.com/lopukhov/dominion/issues).
 //!
 //! ## Parsing
+//!
 //! ```rust
 //!
 //! use dominion_parser::DnsPacket;
@@ -27,6 +28,7 @@
 //! Parsing can fail with a [ParseError].
 //!
 //! ## Serializing
+//!
 //! ```rust
 //! use dominion_parser::body::{RecordData, RecordPreamble, ResourceRecord};
 //! use dominion_parser::header::{AuthenticData, QueryResponse, RecursionAvailable};
@@ -45,7 +47,10 @@
 //!     // Add answer
 //!     let preamble = RecordPreamble {
 //!         name: res.questions[0].name.clone(),
-//!         rrtype: res.questions[0].rrtype,
+//!         rrtype: res.questions[0]
+//!             .qtype
+//!             .try_into()
+//!             .expect("QType is not a valid Type"),
 //!         class: res.questions[0].class,
 //!         ttl: 300,
 //!         rdlen: 4,
@@ -63,7 +68,12 @@
 //! ```
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![warn(
+    missing_docs,
+    rust_2018_idioms,
+    missing_debug_implementations,
+    rustdoc::broken_intra_doc_links
+)]
 
 use thiserror::Error;
 
@@ -173,45 +183,14 @@ impl From<&DnsPacket<'_>> for Vec<u8> {
 /// An error was encountered when trying to parse a byte buffer into a DNS packet
 #[derive(Error, Debug)]
 pub enum ParseError {
-    /// The DNS packet contained funcionality that has not yet been implemented.
-    #[error("Packet contains behaviour not implemented: {0}")]
-    NotImplemented(#[from] NotImplementedError),
-    /// The DNS packet was corrupted or does not conform to the DNS standard(s).
-    #[error("Packet has been corruped or does not conform to DNS standard: {0}")]
-    CorruptPacket(#[from] CorruptedPacketError),
-}
-
-/// The DNS packet contained funcionality that has not yet been implemented.
-#[derive(Error, Debug)]
-pub enum NotImplementedError {
-    /// Some header flag used a value that has not been implemented.
-    #[error("Flag {0} has no implementation for value {1} in the current version.")]
-    HeaderFlag(&'static str, u16),
-    /// The DNS packet contains a [Question] or a [ResourceRecord] with a [QType][body::QType] that has not yet been implemented.
-    #[error("DNS record or query type not implemented with value {0}.")]
-    RecordType(u16),
-    /// The DNS packet contains a [Question] or a [ResourceRecord] with a [Class][body::Class] that has not yet been implemented.
-    #[error("DNS record or query class not implemented with value {0}.")]
-    RecordClass(u16),
-    /// The DNS packet contains a label prefix that is not a length prefix or a pointer. Those values dont have a standard definition so are not implemented.
-    #[error("Byte {0:#b} does not have a pointer or length prefix.")]
-    LabelPrefix(u8),
-}
-
-/// The provided buffer was not a valid DNS packet or has been corruped (intentionally or not).
-#[derive(Error, Debug, PartialEq)]
-pub enum CorruptedPacketError {
     /// The length of the header is too small.
     #[error(
         "Length of packet ({0} bytes) is too small to contain a DNS header (12 bytes in length)."
     )]
     HeaderLength(usize),
-    /// One of the labels in the packet has a length that is bigger than the DNS specification.
-    #[error(
-        "Specified name length ({0}) is too long, is bigger than DNS specification (maximum {}).",
-        crate::body::name::MAX_NAME_SIZE
-    )]
-    NameLength(usize),
+    /// Some header flag used a value that has not been implemented.
+    #[error("Flag {0} has no implementation for value {1} in the current version.")]
+    HeaderFlag(&'static str, u16),
     /// There was a jump to a position forward in the packet (it does not follow the specification) or to itself (it is not sound as it would result in a DoS).
     #[error("Jump points to a section of the packet  equal or greater than the current position.")]
     InvalidJump,
@@ -222,10 +201,19 @@ pub enum CorruptedPacketError {
     )]
     ExcesiveJumps(u8),
     /// Some label in the DNS packet it too long, overflowing the packet or not following the DNS specification.
-    #[error("Specified label length ({0}) is too long, it overflows the rest of the packet  or is bigger than DNS specification (maximum {}).",
+    #[error("Specified label length ({0}) is too long, it overflows the rest of the packet or is bigger than DNS specification (maximum {}).",
         crate::body::name::MAX_LABEL_SIZE
     )]
     LabelLength(usize),
+    /// The DNS packet contains a label prefix that is not a length prefix or a pointer. Those values dont have a standard definition so are not implemented.
+    #[error("Byte {0:#b} does not have a pointer or length prefix.")]
+    LabelPrefix(u8),
+    /// One of the labels in the packet has a length that is bigger than the DNS specification.
+    #[error(
+        "Specified name length ({0}) is too long, is bigger than DNS specification (maximum {}).",
+        crate::body::name::MAX_NAME_SIZE
+    )]
+    NameLength(usize),
     /// The packet tried to cause an out-of-bound read.
     #[error("Out-of-bounds read attempt at position {0}")]
     OobRead(usize),

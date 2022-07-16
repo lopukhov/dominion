@@ -7,11 +7,108 @@ pub mod name;
 
 use crate::binutils::*;
 use crate::body::name::Name;
-use crate::NotImplementedError;
 use crate::ParseError;
 use std::net::Ipv4Addr;
 
 const INIT_RR_SIZE: usize = 64;
+
+macro_rules! types {
+    (
+        $(
+            #[$inner:meta]
+            $variant:tt = $value:literal
+        )+
+    ) => {
+        /// The type of [ResourceRecord].
+        #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
+        pub enum Type {
+            $(
+                #[$inner]
+                $variant,
+            )*
+            /// ?: A value has been received that does not correspond to any known qtype.
+            Unknown(u16),
+        }
+
+        impl TryFrom<QType> for Type {
+            type Error = &'static str;
+
+            #[inline]
+            fn try_from(value: QType) -> Result<Self, Self::Error> {
+                match value {
+                    $(QType::$variant => Ok(Self::$variant),)*
+                    QType::Unknown(n) => Ok(Self::Unknown(n)),
+                    _ => Err("QType is not a valid Type")
+                }
+            }
+        }
+
+        impl From<u16> for Type {
+            #[inline]
+            fn from(value: u16) -> Self {
+                match value {
+                    $($value => Self::$variant,)*
+                    _ => Self::Unknown(value),
+                }
+            }
+        }
+
+        impl From<Type> for u16 {
+            #[inline]
+            fn from(value: Type) -> Self {
+                match value {
+                    $(Type::$variant => $value,)*
+                    Type::Unknown(n) => n,
+                }
+            }
+        }
+
+        /// The type of [Question].
+        #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
+        pub enum QType {
+            $(
+                #[$inner]
+                $variant,
+            )*
+            /// All types
+            All,
+            /// ?: A value has been received that does not correspond to any known qtype.
+            Unknown(u16),
+        }
+
+        impl From<Type> for QType {
+            #[inline]
+            fn from(value: Type) -> Self {
+                match value {
+                    $(Type::$variant => Self::$variant,)*
+                    Type::Unknown(n) => Self::Unknown(n),
+                }
+            }
+        }
+
+        impl From<u16> for QType {
+            #[inline]
+            fn from(value: u16) -> Self {
+                match value {
+                    $($value => Self::$variant,)*
+                    255 => Self::All,
+                    _ => Self::Unknown(value),
+                }
+            }
+        }
+
+        impl From<QType> for u16 {
+            #[inline]
+            fn from(value: QType) -> Self {
+                match value {
+                    $(QType::$variant => $value,)*
+                    QType::All => 255,
+                    QType::Unknown(n) => n,
+                }
+            }
+        }
+    };
+}
 
 /// A query for a [ResourceRecord] of the specified [QType] and [Class].
 ///
@@ -31,16 +128,17 @@ pub struct Question<'a> {
     /// The domain name to be queried
     pub name: Name<'a>,
     /// The type of [ResourceRecord] being queried
-    pub rrtype: QType,
+    pub qtype: QType,
     /// The class of [ResourceRecord] being queried
     pub class: Class,
 }
 
 impl From<Question<'_>> for Vec<u8> {
+    #[inline]
     fn from(question: Question<'_>) -> Self {
         let mut out = question.name.into();
-        push_u16(&mut out, question.rrtype as _);
-        push_u16(&mut out, question.class as _);
+        push_u16(&mut out, question.qtype.into());
+        push_u16(&mut out, question.class.into());
         out
     }
 }
@@ -53,24 +151,26 @@ impl<'a> Question<'a> {
     /// It will error if the buffer does not contain a valid question. If the domain name
     /// in the question has been compressed the buffer should include all previous bytes from
     /// the DNS packet to be considered valid.
+    #[inline]
     pub fn parse(buff: &'a [u8], start: usize) -> Result<(Self, usize), crate::ParseError> {
         let (name, size) = Name::parse(buff, start)?;
         let n = start + size;
         Ok((
             Question {
                 name,
-                rrtype: safe_u16_read(buff, n)?.try_into()?,
-                class: safe_u16_read(buff, n + 2)?.try_into()?,
+                qtype: safe_u16_read(buff, n)?.into(),
+                class: safe_u16_read(buff, n + 2)?.into(),
             },
             size + 4,
         ))
     }
 
     /// Serialize the [Question] and append it tho the end of the provided `packet`
+    #[inline]
     pub fn serialize(&self, packet: &mut Vec<u8>) {
         self.name.serialize(packet);
-        push_u16(packet, self.rrtype as _);
-        push_u16(packet, self.class as _);
+        push_u16(packet, self.qtype.into());
+        push_u16(packet, self.class.into());
     }
 }
 
@@ -107,6 +207,7 @@ pub struct ResourceRecord<'a> {
 }
 
 impl From<ResourceRecord<'_>> for Vec<u8> {
+    #[inline]
     fn from(rr: ResourceRecord<'_>) -> Self {
         let mut out = Vec::with_capacity(INIT_RR_SIZE);
         rr.serialize(&mut out);
@@ -116,6 +217,7 @@ impl From<ResourceRecord<'_>> for Vec<u8> {
 
 impl<'a> ResourceRecord<'a> {
     /// Parse from the specified `buff`, starting at position `pos`.
+    #[inline]
     pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (preamble, size) = RecordPreamble::parse(buff, pos)?;
         let data = RecordData::parse(buff, pos + size, preamble.rrtype)?;
@@ -124,6 +226,7 @@ impl<'a> ResourceRecord<'a> {
     }
 
     /// Serialize the [ResourceRecord] and append it tho the end of the provided `packet`
+    #[inline]
     pub fn serialize(&self, packet: &mut Vec<u8>) {
         self.preamble.serialize(packet);
         self.data.serialize(packet);
@@ -136,7 +239,7 @@ pub struct RecordPreamble<'a> {
     /// The domain name the RR refers to.
     pub name: Name<'a>,
     /// The RR type.
-    pub rrtype: QType,
+    pub rrtype: Type,
     /// The RR class.
     pub class: Class,
     /// The time interval that the resource record may be cached before the source of the information should again be consulted.
@@ -146,14 +249,15 @@ pub struct RecordPreamble<'a> {
 }
 
 impl<'a> RecordPreamble<'a> {
+    #[inline]
     fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (name, size) = Name::parse(buff, pos)?;
         let n = size + pos;
         Ok((
             RecordPreamble {
                 name,
-                rrtype: safe_u16_read(buff, n)?.try_into()?,
-                class: safe_u16_read(buff, n + 2)?.try_into()?,
+                rrtype: safe_u16_read(buff, n)?.into(),
+                class: safe_u16_read(buff, n + 2)?.into(),
                 ttl: safe_i32_read(buff, n + 4)?,
                 rdlen: safe_u16_read(buff, n + 8)?,
             },
@@ -161,10 +265,11 @@ impl<'a> RecordPreamble<'a> {
         ))
     }
 
+    #[inline]
     fn serialize(&self, packet: &mut Vec<u8>) {
         self.name.serialize(packet);
-        push_u16(packet, self.rrtype as _);
-        push_u16(packet, self.class as _);
+        push_u16(packet, self.rrtype.into());
+        push_u16(packet, self.class.into());
         push_i32(packet, self.ttl);
         push_u16(packet, self.rdlen);
     }
@@ -187,31 +292,35 @@ pub enum RecordData<'a> {
         /// A host willing to act as a mail exchange for the owner name.
         exchange: Name<'a>,
     },
+    /// ?: A value has been received that does not correspond to any known type.
+    Unknown(&'a [u8]),
 }
 
 impl<'a> RecordData<'a> {
-    fn parse(buff: &'a [u8], pos: usize, rrtype: QType) -> Result<Self, ParseError> {
+    #[inline]
+    fn parse(buff: &'a [u8], pos: usize, rrtype: Type) -> Result<Self, ParseError> {
         match rrtype {
-            QType::A => Ok(Self::A(safe_ipv4_read(buff, pos)?)),
-            QType::Ns => {
+            Type::A => Ok(Self::A(safe_ipv4_read(buff, pos)?)),
+            Type::Ns => {
                 let (name, _) = Name::parse(buff, pos)?;
                 Ok(Self::Ns(name))
             }
-            QType::Cname => {
+            Type::Cname => {
                 let (name, _) = Name::parse(buff, pos)?;
                 Ok(Self::Cname(name))
             }
-            QType::Mx => {
+            Type::Mx => {
                 let (exchange, _) = Name::parse(buff, pos + 2)?;
                 Ok(Self::Mx {
                     preference: safe_u16_read(buff, pos)?,
                     exchange,
                 })
             }
-            QType::All => Err(NotImplementedError::RecordType(rrtype as _))?,
+            Type::Unknown(_) => todo!(),
         }
     }
 
+    #[inline]
     fn serialize(&self, packet: &mut Vec<u8>) {
         match self {
             Self::A(ip) => packet.extend(ip.octets()),
@@ -224,71 +333,104 @@ impl<'a> RecordData<'a> {
                 push_u16(packet, *preference);
                 exchange.serialize(packet);
             }
+            Self::Unknown(_buff) => todo!(),
         }
     }
 }
 
-/// The type of [Question] or [ResourceRecord].
-#[non_exhaustive]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
-pub enum QType {
+types! {
     /// A host address (IPv4)
-    A = 1,
+    A = 1
     /// An authoritative name server
-    Ns = 2,
+    Ns = 2
     /// The canonical name for an alias
-    Cname = 5,
+    Cname = 5
     /// A mail exchange
-    Mx = 15,
-    /// All types
-    All = 255,
-}
-
-impl TryFrom<u16> for QType {
-    type Error = NotImplementedError;
-
-    fn try_from(value: u16) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(Self::A),
-            2 => Ok(Self::Ns),
-            5 => Ok(Self::Cname),
-            15 => Ok(Self::Mx),
-            255 => Ok(Self::All),
-            _ => Err(NotImplementedError::RecordType(value)),
-        }
-    }
+    Mx = 15
 }
 
 /// An enumeration of the different available DNS Classes.
 ///
 /// In practice should allways be `Class::IN`, but the rest are included for completeness.
-/// The enum is `non_exhaustive` because classes may be added in the future.
-#[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub enum Class {
     /// IN: the Internet
-    IN = 1,
+    IN,
     /// CS: the CSNET class (Obsolete)
-    CS = 2,
+    CS,
     /// CH: the CHAOS class
-    CH = 3,
+    CH,
     /// HS: Hesiod [Dyer 87]
-    HS = 4,
+    HS,
     /// *: any class
-    Any = 255,
+    Any,
+    /// ?: A value has been received that does not correspond to any known class
+    Unknown(u16),
 }
 
-impl TryFrom<u16> for Class {
-    type Error = NotImplementedError;
-
-    fn try_from(value: u16) -> Result<Self, Self::Error> {
+impl From<u16> for Class {
+    #[inline]
+    fn from(value: u16) -> Self {
         match value {
-            1 => Ok(Self::IN),
-            2 => Ok(Self::CS),
-            3 => Ok(Self::CH),
-            4 => Ok(Self::HS),
-            255 => Ok(Self::Any),
-            _ => Err(NotImplementedError::RecordClass(value)),
+            1 => Self::IN,
+            2 => Self::CS,
+            3 => Self::CH,
+            4 => Self::HS,
+            255 => Self::Any,
+            _ => Self::Unknown(value),
         }
+    }
+}
+
+impl From<Class> for u16 {
+    #[inline]
+    fn from(value: Class) -> Self {
+        match value {
+            Class::IN => 1,
+            Class::CS => 2,
+            Class::CH => 3,
+            Class::HS => 4,
+            Class::Any => 255,
+            Class::Unknown(n) => n,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn class_transformations() {
+        assert_eq!(Class::IN, From::from(1u16));
+        assert_eq!(Class::CS, From::from(2u16));
+        assert_eq!(Class::CH, From::from(3u16));
+        assert_eq!(Class::HS, From::from(4u16));
+        assert_eq!(Class::Any, From::from(255u16));
+        assert_eq!(Class::Unknown(225u16), From::from(225u16));
+
+        assert_eq!(1u16, From::from(Class::IN));
+        assert_eq!(2u16, From::from(Class::CS));
+        assert_eq!(3u16, From::from(Class::CH));
+        assert_eq!(4u16, From::from(Class::HS));
+        assert_eq!(255u16, From::from(Class::Any));
+        assert_eq!(225u16, From::from(Class::Unknown(225u16)));
+    }
+
+    #[test]
+    fn qtype_transformations() {
+        assert_eq!(QType::A, From::from(1u16));
+        assert_eq!(QType::Ns, From::from(2u16));
+        assert_eq!(QType::Cname, From::from(5u16));
+        assert_eq!(QType::Mx, From::from(15u16));
+        assert_eq!(QType::All, From::from(255u16));
+        assert_eq!(QType::Unknown(225u16), From::from(225u16));
+
+        assert_eq!(1u16, From::from(QType::A));
+        assert_eq!(2u16, From::from(QType::Ns));
+        assert_eq!(5u16, From::from(QType::Cname));
+        assert_eq!(15u16, From::from(QType::Mx));
+        assert_eq!(255u16, From::from(QType::All));
+        assert_eq!(225u16, From::from(QType::Unknown(225u16)));
     }
 }

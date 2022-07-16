@@ -3,8 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::binutils::*;
-use crate::CorruptedPacketError;
-use crate::NotImplementedError;
 use crate::ParseError;
 use std::fmt;
 use std::iter::zip;
@@ -27,6 +25,7 @@ type IterHuman<'a> = Rev<IterHierarchy<'a>>;
 type IterHierarchy<'a> = Copied<std::slice::Iter<'a, &'a str>>;
 
 impl fmt::Display for Name<'_> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for l in self.iter_human() {
             write!(f, "{}.", l)?;
@@ -36,6 +35,7 @@ impl fmt::Display for Name<'_> {
 }
 
 impl fmt::Debug for Name<'_> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for l in self.iter_human() {
             write!(f, "{}.", l)?;
@@ -45,13 +45,15 @@ impl fmt::Debug for Name<'_> {
 }
 
 impl Default for Name<'_> {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl From<Name<'_>> for Vec<u8> {
-    fn from(name: Name) -> Self {
+    #[inline]
+    fn from(name: Name<'_>) -> Self {
         let mut out = Vec::with_capacity(name.0.len() * 8);
         name.serialize(&mut out);
         out
@@ -66,6 +68,7 @@ impl<'a> Name<'a> {
     /// It will error if the buffer does not contain a valid domain name. If the domain name
     /// has been compressed the buffer should include all previous bytes from the DNS packet
     /// to be considered valid. Jump pointers should only point backwards inside the `buf`.
+    #[inline]
     pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (positions, n) = find_labels(buff, pos)?;
         let name = parse_labels(buff, positions)?;
@@ -73,6 +76,7 @@ impl<'a> Name<'a> {
     }
 
     /// Serialize the [Name] and append it tho the end of the provided `packet`
+    #[inline]
     pub fn serialize(&self, packet: &mut Vec<u8>) {
         for label in self.iter_human() {
             packet.push(label.len() as _);
@@ -88,6 +92,7 @@ impl<'a> Name<'a> {
     /// let name = Name::new();
     /// assert_eq!(name.to_string(), "".to_string())
     /// ```
+    #[inline]
     pub fn new() -> Self {
         Name(Vec::with_capacity(INIT_NUM_LABELS))
     }
@@ -101,6 +106,7 @@ impl<'a> Name<'a> {
     /// name.push_label("example");
     /// assert_eq!(name.tld(), Some("com"))
     /// ```
+    #[inline]
     pub fn tld(&self) -> Option<&str> {
         self.0.get(0).copied()
     }
@@ -114,6 +120,7 @@ impl<'a> Name<'a> {
     /// name.push_label("example");
     /// assert_eq!(name.to_string(), "example.com.".to_string())
     /// ```
+    #[inline]
     pub fn push_label(&mut self, label: &'a str) {
         self.0.push(label);
     }
@@ -133,6 +140,7 @@ impl<'a> Name<'a> {
     ///
     /// assert!(name.is_subdomain(&sub))
     /// ```
+    #[inline]
     pub fn is_subdomain(&self, sub: &Name<'_>) -> bool {
         if self.0.len() > sub.0.len() {
             false
@@ -155,7 +163,8 @@ impl<'a> Name<'a> {
     /// assert_eq!(human.next(), Some("example"));
     /// assert_eq!(human.next(), Some("com"));
     /// ```
-    pub fn iter_human(&self) -> IterHuman {
+    #[inline]
+    pub fn iter_human(&self) -> IterHuman<'_> {
         self.iter_hierarchy().rev()
     }
 
@@ -173,17 +182,19 @@ impl<'a> Name<'a> {
     /// assert_eq!(hierarchy.next(), Some("example"));
     /// assert_eq!(hierarchy.next(), Some("subdomain"));
     /// ```
-    pub fn iter_hierarchy(&self) -> IterHierarchy {
+    #[inline]
+    pub fn iter_hierarchy(&self) -> IterHierarchy<'_> {
         self.0.iter().copied()
     }
 }
 
 type LabelsPositions = Vec<(usize, usize)>;
 
-fn parse_labels(buff: &[u8], positions: LabelsPositions) -> Result<Name, ParseError> {
+#[inline]
+fn parse_labels(buff: &[u8], positions: LabelsPositions) -> Result<Name<'_>, ParseError> {
     let mut name = Name::new();
     for (pos, size) in positions.into_iter().rev() {
-        let label = str::from_utf8(&buff[pos..pos + size]).map_err(CorruptedPacketError::from)?;
+        let label = str::from_utf8(&buff[pos..pos + size]).map_err(ParseError::from)?;
         name.push_label(label);
     }
     Ok(name)
@@ -195,12 +206,12 @@ fn find_labels(buff: &[u8], pos: usize) -> Result<(LabelsPositions, usize), Pars
     let (mut pos, mut size, mut jumps) = (pos, 0, 0);
     loop {
         if jumps > MAX_JUMPS {
-            Err(CorruptedPacketError::ExcesiveJumps(jumps))?;
+            Err(ParseError::ExcesiveJumps(jumps))?;
         }
         match read_label_metadata(buff, pos)? {
-            LabelMeta::Size(s) if s > MAX_LABEL_SIZE => Err(CorruptedPacketError::LabelLength(s))?,
-            LabelMeta::Size(s) if blen <= pos + s => Err(CorruptedPacketError::LabelLength(s))?,
-            LabelMeta::Pointer(ptr) if ptr >= pos => Err(CorruptedPacketError::InvalidJump)?,
+            LabelMeta::Size(s) if s > MAX_LABEL_SIZE => Err(ParseError::LabelLength(s))?,
+            LabelMeta::Size(s) if blen <= pos + s => Err(ParseError::LabelLength(s))?,
+            LabelMeta::Pointer(ptr) if ptr >= pos => Err(ParseError::InvalidJump)?,
             LabelMeta::Size(s) if jumps == 0 => {
                 positions.push((pos + 1, s));
                 pos += s + 1;
@@ -228,6 +239,7 @@ enum LabelMeta {
     Pointer(usize),
 }
 
+#[inline]
 fn read_label_metadata(buff: &[u8], pos: usize) -> Result<LabelMeta, ParseError> {
     let b = safe_u8_read(buff, pos)?;
     match b {
@@ -236,7 +248,7 @@ fn read_label_metadata(buff: &[u8], pos: usize) -> Result<LabelMeta, ParseError>
         0b1100_0000..=0xFF => Ok(LabelMeta::Pointer(
             (safe_u16_read(buff, pos)? ^ 0b1100_0000_0000_0000) as _,
         )),
-        _ => Err(NotImplementedError::LabelPrefix(b))?,
+        _ => Err(ParseError::LabelPrefix(b))?,
     }
 }
 

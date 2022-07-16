@@ -9,7 +9,6 @@ repository = "https://github.com/lopukhov/dominion"
 keywords = ["dns", "named", "parser", "domain"]
 categories = ["network-programming"]
 
-
 [dependencies]
 thiserror = "1.0"
 
@@ -20,6 +19,10 @@ pprof = { version = "0.9", features = ["flamegraph", "criterion"] }
 
 [[bench]]
 name = "parsing_benchmark"
+harness = false
+
+[[bench]]
+name = "serialize_benchmark"
 harness = false
 
 [profile.bench]

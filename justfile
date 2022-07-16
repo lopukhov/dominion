@@ -7,6 +7,10 @@ check:
   cargo clippy
   cargo test
 
+# Profile the appropiate benchmark
+profile SUITE BENCH:
+  cargo bench --bench {{SUITE}} -- --profile-time 60 {{BENCH}}
+
 # Build binary with selected PROFILE
 build PROFILE:
   cargo build --profile {{PROFILE}}

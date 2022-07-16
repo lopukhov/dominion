@@ -29,7 +29,7 @@ fn test_parse_request() {
     assert_eq!(header.additional, 0);
 
     assert_eq!(questions.len(), 1);
-    assert_eq!(questions[0].rrtype, QType::A);
+    assert_eq!(questions[0].qtype, QType::A);
     assert_eq!(questions[0].class, Class::IN);
     assert_eq!(
         questions[0].name.to_string(),
@@ -67,7 +67,7 @@ fn test_parse_response() {
     assert_eq!(header.additional, 0);
 
     assert_eq!(questions.len(), 1);
-    assert_eq!(questions[0].rrtype, QType::A);
+    assert_eq!(questions[0].qtype, QType::A);
     assert_eq!(questions[0].class, Class::IN);
     assert_eq!(
         questions[0].name.to_string(),
