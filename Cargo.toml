@@ -8,7 +8,7 @@ readme = "README.md"
 repository = "https://github.com/lopukhov/dominion"
 keywords = ["dns", "named", "parser", "domain"]
 categories = ["network-programming"]
-include = ["src/**/*", "AUTHORS", "LICENSE", "README.md", "assets/dns_request.bin", "!**/assets/**/*"]
+include = ["src/**/*", "AUTHORS", "LICENSE", "README.md", "assets/dns_request.bin", "benches/*.rs", "!**/assets/**/*"]
 
 [dependencies]
 thiserror = "1.0"
