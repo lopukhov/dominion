@@ -11,4 +11,4 @@ categories = ["network-programming"]
 include = ["src/**/*", "README.md", "!**/assets/**/*"]
 
 [dependencies]
-dominion-parser = { path = "../parser" }
+dominion-parser = { path = "../parser", version = "0.2"}
