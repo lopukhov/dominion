@@ -2,13 +2,13 @@
 name = "dominion-parser"
 description = "DNS protocol parser"
 license = "MPL-2.0"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 readme = "README.md"
 repository = "https://github.com/lopukhov/dominion"
 keywords = ["dns", "named", "parser", "domain"]
 categories = ["network-programming"]
-include = ["src/**/*", "AUTHORS", "LICENSE", "README.md", "assets/dns_request.bin", "benches/*.rs", "!**/assets/**/*"]
+include = ["src/**/*", "README.md", "assets/dns_request.bin", "benches/*.rs", "!**/assets/**/*"]
 
 [dependencies]
 thiserror = "1.0"
