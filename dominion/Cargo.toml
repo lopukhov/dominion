@@ -1,0 +1,13 @@
+[package]
+name = "dominion"
+version = "0.1.0"
+edition = "2021"
+description = "Build DNS clients and servers"
+license = "MPL-2.0"
+readme = "README.md"
+repository = "https://github.com/lopukhov/dominion"
+keywords = ["dns", "named", "server", "client", "domain"]
+categories = ["network-programming"]
+
+[dependencies]
+dominion-parser = { path = "../parser" }

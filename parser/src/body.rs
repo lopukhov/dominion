@@ -220,7 +220,7 @@ impl<'a> ResourceRecord<'a> {
     #[inline]
     pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (preamble, size) = RecordPreamble::parse(buff, pos)?;
-        let data = RecordData::parse(buff, pos + size, preamble.rrtype)?;
+        let data = RecordData::parse(buff, pos + size, &preamble)?;
         let size = size + preamble.rdlen as usize;
         Ok((Self { preamble, data }, size))
     }
@@ -298,8 +298,12 @@ pub enum RecordData<'a> {
 
 impl<'a> RecordData<'a> {
     #[inline]
-    fn parse(buff: &'a [u8], pos: usize, rrtype: Type) -> Result<Self, ParseError> {
-        match rrtype {
+    fn parse(
+        buff: &'a [u8],
+        pos: usize,
+        rrpreamble: &RecordPreamble<'_>,
+    ) -> Result<Self, ParseError> {
+        match rrpreamble.rrtype {
             Type::A => Ok(Self::A(safe_ipv4_read(buff, pos)?)),
             Type::Ns => {
                 let (name, _) = Name::parse(buff, pos)?;
@@ -316,7 +320,13 @@ impl<'a> RecordData<'a> {
                     exchange,
                 })
             }
-            Type::Unknown(_) => todo!(),
+            Type::Unknown(_) => {
+                let end = pos + rrpreamble.rdlen as usize;
+                if buff.len() < end {
+                    Err(ParseError::OobRead(end))?
+                }
+                Ok(Self::Unknown(&buff[pos..end]))
+            }
         }
     }
 
@@ -333,7 +343,7 @@ impl<'a> RecordData<'a> {
                 push_u16(packet, *preference);
                 exchange.serialize(packet);
             }
-            Self::Unknown(_buff) => todo!(),
+            Self::Unknown(buff) => packet.extend(*buff),
         }
     }
 }
