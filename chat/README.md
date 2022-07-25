@@ -3,7 +3,7 @@
 
 DNS chat server for fun and profit
 
-[dominion-chat](./assets/dominion-chat-hello-world.png)
+![dominion-chat](./assets/dominion-chat-hello-world.png)
 
 # Usage
 

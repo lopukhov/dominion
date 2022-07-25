@@ -7,7 +7,7 @@ Dominion is a set of libraries and tools to work with DNS.
 
 DNS chat server for fun and profit
 
-[dominion-chat](chat/assets/dominion-chat-hello-world.png)
+![dominion-chat](chat/assets/dominion-chat-hello-world.png)
 
 ## [Dominion Parser](https://github.com/lopukhov/dominion/tree/main/parser)
 
