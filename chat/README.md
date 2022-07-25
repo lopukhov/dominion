@@ -3,7 +3,16 @@
 
 DNS chat server for fun and profit
 
-![dominion-chat](./assets/dominion-chat-hello-world.png)
+Running the following command:
+
+```
+sh-5.1$ dig @127.0.0.1 -p 5454 hello-world.example.com +short
+127.0.0.1
+```
+
+Gives:
+
+![dominion-chat](https://github.com/lopukhov/dominion/raw/HEAD/chat/assets/dominion-chat-hello-world.png)
 
 # Usage
 
