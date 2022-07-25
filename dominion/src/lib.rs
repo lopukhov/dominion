@@ -8,13 +8,14 @@
 //!
 //! ## Server
 //!
-//! ```rust
+//! ```no_run
 //! use dominion::{Server, ServerService, DnsPacket};
+//! use std::net::SocketAddr;
 //!
 //! struct Echo;
 //!
 //! impl ServerService for Echo {
-//!     fn run<'a>(&self, question: DnsPacket<'a>) -> DnsPacket<'a> { question }
+//!     fn run<'a>(&self, _client: SocketAddr, question: DnsPacket<'a>) -> DnsPacket<'a> { question }
 //! }
 //!
 //! Server::default()
@@ -48,16 +49,17 @@ pub use dominion_parser::*;
 ///
 /// ```rust
 /// use dominion::{ServerService, DnsPacket};
+/// use std::net::SocketAddr;
 ///
 /// struct Echo;
 ///
 /// impl ServerService for Echo {
-///     fn run<'a>(&self, question: DnsPacket<'a>) -> DnsPacket<'a> { question }
+///     fn run<'a>(&self, _client: SocketAddr, question: DnsPacket<'a>) -> DnsPacket<'a> { question }
 /// }
 /// ```
 pub trait ServerService {
     /// Take a [DnsPacket] as an question and return the response to be sent to the client.
-    fn run<'a>(&self, question: DnsPacket<'a>) -> DnsPacket<'a>;
+    fn run<'a>(&self, client: SocketAddr, question: DnsPacket<'a>) -> DnsPacket<'a>;
 }
 
 #[doc(hidden)]
@@ -70,7 +72,7 @@ pub struct Runner;
 /// A DNS server
 #[derive(Debug)]
 pub struct Server<S> {
-    threads: u8,
+    threads: usize,
     socket: Option<UdpSocket>,
     typestate: marker::PhantomData<S>,
 }
@@ -94,7 +96,7 @@ impl Default for Server<Builder> {
 
 impl Server<Builder> {
     /// Set the number of threads in the thread-pool.
-    pub fn threads(mut self, n: u8) -> Self {
+    pub fn threads(mut self, n: usize) -> Self {
         self.threads = n;
         self
     }
@@ -110,16 +112,20 @@ impl Server<Builder> {
 }
 impl Server<Runner> {
     /// Run the [ServerService] in the thread-pool.
-    pub fn serve<T>(self, srv: T) -> Result<(), std::io::Error>
+    ///
+    /// If an error is encountered when parsing the [DnsPacket] the error is silently droped.
+    pub fn serve<T>(self, srv: T)
     where
         T: ServerService + Sync,
     {
         std::thread::scope(|s| {
             for _ in 0..self.threads {
-                s.spawn(|| self.serve_sth(&srv));
+                s.spawn(|| {
+                    self.serve_sth(&srv)
+                        .expect("Unexpected error when sending or recieving from the socket")
+                });
             }
-        });
-        Ok(())
+        })
     }
 
     fn serve_sth(&self, srv: &impl ServerService) -> Result<(), std::io::Error> {
@@ -134,7 +140,7 @@ impl Server<Runner> {
                 Ok(packet) => packet,
                 Err(_) => continue,
             };
-            let res = srv.run(packet);
+            let res = srv.run(src, packet);
             let serialized = Vec::<u8>::from(&res);
             self.socket
                 .as_ref()

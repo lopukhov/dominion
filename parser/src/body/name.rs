@@ -60,6 +60,22 @@ impl From<Name<'_>> for Vec<u8> {
     }
 }
 
+impl<'a> TryFrom<&'a str> for Name<'a> {
+    type Error = ParseError;
+
+    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        let mut name = Name::default();
+        for label in value.rsplit('.') {
+            if label.len() < MAX_LABEL_SIZE {
+                name.push_label(label);
+            } else {
+                Err(ParseError::LabelLength(label.len()))?
+            }
+        }
+        Ok(name)
+    }
+}
+
 impl<'a> Name<'a> {
     /// Parse from the specified `buff`, starting at position `pos`.
     ///
@@ -72,6 +88,7 @@ impl<'a> Name<'a> {
     pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (positions, n) = find_labels(buff, pos)?;
         let name = parse_labels(buff, positions)?;
+        // TODO: Max name size
         Ok((name, n))
     }
 
@@ -101,17 +118,16 @@ impl<'a> Name<'a> {
     ///
     /// ```
     /// # use dominion_parser::body::name::Name;
-    /// let mut name = Name::new();
-    /// name.push_label("com");
-    /// name.push_label("example");
+    /// let mut name = Name::try_from("example.com").unwrap();
     /// assert_eq!(name.tld(), Some("com"))
     /// ```
     #[inline]
     pub fn tld(&self) -> Option<&str> {
-        self.0.get(0).copied()
+        self.0.first().copied()
     }
 
-    /// Push a new label to the end of the domain name, as a subdomain of the current one.
+    /// Push a new label to the end of the domain name, as a subdomain of the current one. Empty
+    /// labels will be ignored.
     ///
     /// ```
     /// # use dominion_parser::body::name::Name;
@@ -122,21 +138,29 @@ impl<'a> Name<'a> {
     /// ```
     #[inline]
     pub fn push_label(&mut self, label: &'a str) {
-        self.0.push(label);
+        if !label.is_empty() {
+            self.0.push(label);
+        }
+    }
+
+    /// Get the number of labels in the domain name.
+    ///
+    /// ```
+    /// # use dominion_parser::body::name::Name;
+    /// let mut name = Name::try_from("example.com").unwrap();
+    /// assert_eq!(2, name.label_count())
+    /// ```
+    #[inline]
+    pub fn label_count(&self) -> usize {
+        self.0.len()
     }
 
     /// Check if `sub` is a subdomain of the current domain name.
     ///
     /// ```
     /// # use dominion_parser::body::name::Name;
-    /// let mut name = Name::new();
-    /// name.push_label("com");
-    /// name.push_label("example");
-    ///
-    /// let mut sub = Name::new();
-    /// sub.push_label("com");
-    /// sub.push_label("example");
-    /// sub.push_label("subdomain");
+    /// let mut name = Name::try_from("example.com").unwrap();
+    /// let mut sub = Name::try_from("subdomain.example.com").unwrap();
     ///
     /// assert!(name.is_subdomain(&sub))
     /// ```
@@ -153,10 +177,7 @@ impl<'a> Name<'a> {
     ///
     /// ```
     /// # use dominion_parser::body::name::Name;
-    /// let mut name = Name::new();
-    /// name.push_label("com");
-    /// name.push_label("example");
-    /// name.push_label("subdomain");
+    /// let mut name = Name::try_from("subdomain.example.com").unwrap();
     /// let mut human = name.iter_human();
     ///
     /// assert_eq!(human.next(), Some("subdomain"));
@@ -172,10 +193,7 @@ impl<'a> Name<'a> {
     ///
     /// ```
     /// # use dominion_parser::body::name::Name;
-    /// let mut name = Name::new();
-    /// name.push_label("com");
-    /// name.push_label("example");
-    /// name.push_label("subdomain");
+    /// let mut name = Name::try_from("subdomain.example.com").unwrap();
     /// let mut hierarchy = name.iter_hierarchy();
     ///
     /// assert_eq!(hierarchy.next(), Some("com"));
@@ -407,5 +425,14 @@ mod tests {
 
         assert!(parent.is_subdomain(&sub));
         assert!(!sub.is_subdomain(&parent));
+    }
+
+    #[test]
+    fn root_subdomain() {
+        let root = Name::default();
+        let subd = Name::try_from("example.com").unwrap();
+
+        assert!(root.is_subdomain(&subd));
+        assert!(!subd.is_subdomain(&root));
     }
 }

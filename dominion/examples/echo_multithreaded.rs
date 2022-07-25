@@ -2,12 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::net::SocketAddr;
+
 use dominion::{DnsPacket, Server, ServerService};
 
 struct Echo;
 
 impl ServerService for Echo {
-    fn run<'a>(&self, question: DnsPacket<'a>) -> DnsPacket<'a> {
+    fn run<'a>(&self, _: SocketAddr, question: DnsPacket<'a>) -> DnsPacket<'a> {
         question
     }
 }
@@ -18,5 +20,4 @@ fn main() {
         .bind("127.0.0.1:5454".parse().unwrap())
         .unwrap()
         .serve(Echo)
-        .unwrap();
 }

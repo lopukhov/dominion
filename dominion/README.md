@@ -7,11 +7,12 @@ A crate to implement DNS [Server]s and clients.
 
 ```rust
 use dominion::{Server, ServerService, DnsPacket};
+use std::net::SocketAddr;
 
 struct Echo;
 
 impl ServerService for Echo {
-   fn run<'a>(&self, question: DnsPacket<'a>) -> DnsPacket<'a> { question }
+   fn run<'a>(&self, _client: SocketAddr, question: DnsPacket<'a>) -> DnsPacket<'a> { question }
 }
 
 Server::default()

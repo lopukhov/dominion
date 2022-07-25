@@ -1,6 +1,6 @@
 [package]
 name = "dominion"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Build DNS clients and servers"
 license = "MPL-2.0"
@@ -11,4 +11,4 @@ categories = ["network-programming"]
 include = ["src/**/*", "README.md", "!**/assets/**/*"]
 
 [dependencies]
-dominion-parser = { path = "../parser", version = "0.2"}
+dominion-parser = { path = "../parser", version = "0.3"}

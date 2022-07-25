@@ -1,6 +1,10 @@
 [workspace]
 
-members = ["parser", "dominion"]
+members = [
+  "parser", 
+  "dominion", 
+  "chat"
+]
 
 [profile.bench]
 debug = true
