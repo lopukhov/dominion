@@ -1,6 +1,6 @@
 [package]
 name = "dominion-chat"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "DNS chat server for fun and profit"
 license = "MPL-2.0"
@@ -11,7 +11,7 @@ categories = ["network-programming"]
 include = ["src/**/*", "README.md", "assets/dominion-chat-hello-world.png", "!**/assets/**/*"]
 
 [dependencies]
-dominion = { path = "../dominion", version = "0.2"}
+dominion = { path = "../dominion", version = "0.3"}
 argh = "0.1"
 num_cpus = "1"
 owo-colors = "3"

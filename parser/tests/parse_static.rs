@@ -10,6 +10,39 @@ use std::net::Ipv4Addr;
 const REQ: &'static [u8; 33] = include_bytes!("../assets/dns_request.bin");
 const RES: &'static [u8; 49] = include_bytes!("../assets/dns_response.bin");
 
+const LONG_REQ: &'static [u8; 270] = include_bytes!("../assets/dns_longreq.bin");
+
+#[test]
+fn test_parse_long_request() {
+    let DnsPacket {
+        header,
+        questions,
+        answers,
+        authority,
+        additional,
+    } = DnsPacket::try_from(&LONG_REQ[..]).unwrap();
+
+    assert_eq!(header.flags.qr, QueryResponse::Query);
+    assert_eq!(header.flags.opcode, OpCode::Query);
+    assert_eq!(header.flags.aa, AuthoritativeAnswer::NonAuthoritative);
+    assert_eq!(header.questions, 1);
+    assert_eq!(header.answers, 0);
+    assert_eq!(header.authority, 0);
+    assert_eq!(header.additional, 0);
+
+    assert_eq!(questions.len(), 1);
+    assert_eq!(questions[0].qtype, QType::A);
+    assert_eq!(questions[0].class, Class::IN);
+    assert_eq!(
+        questions[0].name.to_string(),
+        "this.isavery.longdomain.nameused.tobenchmark.mylittleprogram.example.com.".to_string()
+    );
+
+    assert!(answers.is_empty());
+    assert!(authority.is_empty());
+    assert!(additional.is_empty());
+}
+
 #[test]
 fn test_parse_request() {
     let DnsPacket {

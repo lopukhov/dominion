@@ -10,6 +10,14 @@ use pprof::criterion::{Output, PProfProfiler};
 const REQ: &'static [u8; 33] = include_bytes!("../assets/dns_request.bin");
 const RES: &'static [u8; 49] = include_bytes!("../assets/dns_response.bin");
 
+const LONG_REQ: &'static [u8; 270] = include_bytes!("../assets/dns_longreq.bin");
+
+pub fn parse_long_request(c: &mut Criterion) {
+    c.bench_function("parse_longreq", |b| {
+        b.iter(|| DnsPacket::try_from(black_box(&LONG_REQ[..])).unwrap())
+    });
+}
+
 pub fn parse_request(c: &mut Criterion) {
     c.bench_function("parse_req", |b| {
         b.iter(|| DnsPacket::try_from(black_box(&REQ[..])).unwrap())
@@ -28,6 +36,6 @@ criterion_group!(
             .with_profiler(
                 PProfProfiler::new(100, Output::Flamegraph(None))
             );
-    targets = parse_request, parse_response
+    targets = parse_request, parse_long_request, parse_response
 );
 criterion_main!(parse);

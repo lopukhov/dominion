@@ -9,8 +9,8 @@ use dominion::{DnsPacket, Server, ServerService};
 struct Echo;
 
 impl ServerService for Echo {
-    fn run<'a>(&self, _: SocketAddr, question: DnsPacket<'a>) -> DnsPacket<'a> {
-        question
+    fn run<'a>(&self, _: SocketAddr, question: DnsPacket<'a>) -> Option<DnsPacket<'a>> {
+        Some(question)
     }
 }
 

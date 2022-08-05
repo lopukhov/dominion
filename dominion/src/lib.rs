@@ -15,7 +15,7 @@
 //! struct Echo;
 //!
 //! impl ServerService for Echo {
-//!     fn run<'a>(&self, _client: SocketAddr, question: DnsPacket<'a>) -> DnsPacket<'a> { question }
+//!     fn run<'a>(&self, _client: SocketAddr, question: DnsPacket<'a>) -> Option<DnsPacket<'a>> { Some(question) }
 //! }
 //!
 //! Server::default()
@@ -54,12 +54,12 @@ pub use dominion_parser::*;
 /// struct Echo;
 ///
 /// impl ServerService for Echo {
-///     fn run<'a>(&self, _client: SocketAddr, question: DnsPacket<'a>) -> DnsPacket<'a> { question }
+///     fn run<'a>(&self, _client: SocketAddr, question: DnsPacket<'a>) -> Option<DnsPacket<'a>> { Some(question)}
 /// }
 /// ```
 pub trait ServerService {
     /// Take a [DnsPacket] as an question and return the response to be sent to the client.
-    fn run<'a>(&self, client: SocketAddr, question: DnsPacket<'a>) -> DnsPacket<'a>;
+    fn run<'a>(&self, client: SocketAddr, question: DnsPacket<'a>) -> Option<DnsPacket<'a>>;
 }
 
 #[doc(hidden)]
@@ -140,12 +140,13 @@ impl Server<Runner> {
                 Ok(packet) => packet,
                 Err(_) => continue,
             };
-            let res = srv.run(src, packet);
-            let serialized = Vec::<u8>::from(&res);
-            self.socket
-                .as_ref()
-                .expect("Runners can only be created with a active socket")
-                .send_to(&serialized[..], src)?;
+            if let Some(res) = srv.run(src, packet) {
+                let serialized = Vec::<u8>::from(&res);
+                self.socket
+                    .as_ref()
+                    .expect("Runners can only be created with a active socket")
+                    .send_to(&serialized[..], src)?;
+            };
         }
     }
 }

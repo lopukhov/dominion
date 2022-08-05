@@ -10,7 +10,7 @@ use std::iter::Copied;
 use std::iter::Rev;
 use std::str;
 
-const INIT_NUM_LABELS: usize = 4;
+const INIT_NUM_LABELS: usize = 8;
 
 pub(crate) const MAX_JUMPS: u8 = 5;
 
@@ -212,7 +212,7 @@ type LabelsPositions = Vec<(usize, usize)>;
 fn parse_labels(buff: &[u8], positions: LabelsPositions) -> Result<Name<'_>, ParseError> {
     let mut name = Name::new();
     for (pos, size) in positions.into_iter().rev() {
-        let label = str::from_utf8(&buff[pos..pos + size]).map_err(ParseError::from)?;
+        let label = str::from_utf8(&buff[pos..pos + size])?;
         name.push_label(label);
     }
     Ok(name)
@@ -220,7 +220,7 @@ fn parse_labels(buff: &[u8], positions: LabelsPositions) -> Result<Name<'_>, Par
 
 fn find_labels(buff: &[u8], pos: usize) -> Result<(LabelsPositions, usize), ParseError> {
     let blen = buff.len();
-    let mut positions = LabelsPositions::new();
+    let mut positions = LabelsPositions::with_capacity(INIT_NUM_LABELS);
     let (mut pos, mut size, mut jumps) = (pos, 0, 0);
     loop {
         if jumps > MAX_JUMPS {

@@ -8,7 +8,8 @@ pub mod name;
 use crate::binutils::*;
 use crate::body::name::Name;
 use crate::ParseError;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
+use std::str;
 
 const INIT_RR_SIZE: usize = 64;
 
@@ -220,9 +221,8 @@ impl<'a> ResourceRecord<'a> {
     #[inline]
     pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
         let (preamble, size) = RecordPreamble::parse(buff, pos)?;
-        let data = RecordData::parse(buff, pos + size, &preamble)?;
-        let size = size + preamble.rdlen as usize;
-        Ok((Self { preamble, data }, size))
+        let (data, len) = RecordData::parse(buff, pos + size, &preamble)?;
+        Ok((Self { preamble, data }, size + len))
     }
 
     /// Serialize the [ResourceRecord] and append it tho the end of the provided `packet`
@@ -292,6 +292,10 @@ pub enum RecordData<'a> {
         /// A host willing to act as a mail exchange for the owner name.
         exchange: Name<'a>,
     },
+    /// Text strings
+    Txt(&'a str),
+    /// A host address IPv6
+    Aaaa(Ipv6Addr),
     /// ?: A value has been received that does not correspond to any known type.
     Unknown(&'a [u8]),
 }
@@ -302,30 +306,42 @@ impl<'a> RecordData<'a> {
         buff: &'a [u8],
         pos: usize,
         rrpreamble: &RecordPreamble<'_>,
-    ) -> Result<Self, ParseError> {
+    ) -> Result<(Self, usize), ParseError> {
         match rrpreamble.rrtype {
-            Type::A => Ok(Self::A(safe_ipv4_read(buff, pos)?)),
+            Type::A => Ok((Self::A(safe_ipv4_read(buff, pos)?), 4)),
             Type::Ns => {
-                let (name, _) = Name::parse(buff, pos)?;
-                Ok(Self::Ns(name))
+                let (name, n) = Name::parse(buff, pos)?;
+                Ok((Self::Ns(name), n))
             }
             Type::Cname => {
-                let (name, _) = Name::parse(buff, pos)?;
-                Ok(Self::Cname(name))
+                let (name, n) = Name::parse(buff, pos)?;
+                Ok((Self::Cname(name), n))
             }
             Type::Mx => {
-                let (exchange, _) = Name::parse(buff, pos + 2)?;
-                Ok(Self::Mx {
-                    preference: safe_u16_read(buff, pos)?,
-                    exchange,
-                })
+                let (exchange, n) = Name::parse(buff, pos + 2)?;
+                Ok((
+                    Self::Mx {
+                        preference: safe_u16_read(buff, pos)?,
+                        exchange,
+                    },
+                    n + 2,
+                ))
             }
+            Type::Txt => {
+                let len = safe_u8_read(buff, pos)?;
+                Ok((
+                    Self::Txt(str::from_utf8(&buff[pos..pos + len as usize])?),
+                    len as _,
+                ))
+            }
+            Type::Aaaa => Ok((Self::Aaaa(safe_ipv6_read(buff, pos)?), 16)),
             Type::Unknown(_) => {
-                let end = pos + rrpreamble.rdlen as usize;
+                let len = rrpreamble.rdlen as _;
+                let end = pos + len;
                 if buff.len() < end {
                     Err(ParseError::OobRead(end))?
                 }
-                Ok(Self::Unknown(&buff[pos..end]))
+                Ok((Self::Unknown(&buff[pos..end]), len))
             }
         }
     }
@@ -343,6 +359,11 @@ impl<'a> RecordData<'a> {
                 push_u16(packet, *preference);
                 exchange.serialize(packet);
             }
+            Self::Txt(txt) => {
+                packet.push(txt.len() as _);
+                packet.extend(txt.as_bytes());
+            }
+            Self::Aaaa(ip) => packet.extend(ip.octets()),
             Self::Unknown(buff) => packet.extend(*buff),
         }
     }
@@ -357,6 +378,10 @@ types! {
     Cname = 5
     /// A mail exchange
     Mx = 15
+    /// Text strings
+    Txt = 16
+    /// A host address (IPv6)
+    Aaaa = 28
 }
 
 /// An enumeration of the different available DNS Classes.

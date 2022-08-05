@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::ParseError;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[inline]
 fn safe_read<const N: usize>(buff: &[u8], pos: usize) -> Result<[u8; N], ParseError> {
@@ -38,6 +38,12 @@ pub(crate) fn safe_i32_read(buff: &[u8], pos: usize) -> Result<i32, ParseError> 
 pub(crate) fn safe_ipv4_read(buff: &[u8], pos: usize) -> Result<Ipv4Addr, ParseError> {
     let bytes = safe_read::<4>(buff, pos)?;
     Ok(Ipv4Addr::from(bytes))
+}
+
+#[inline]
+pub(crate) fn safe_ipv6_read(buff: &[u8], pos: usize) -> Result<Ipv6Addr, ParseError> {
+    let bytes = safe_read::<16>(buff, pos)?;
+    Ok(Ipv6Addr::from(bytes))
 }
 
 #[inline]

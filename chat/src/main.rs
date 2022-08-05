@@ -50,11 +50,21 @@ fn main() {
 
     let chat = Chat::new(name);
 
-    Server::default()
+    let server = match Server::default()
         .threads(args.threads)
         .bind((args.ip, args.port).into())
-        .unwrap()
-        .serve(chat)
+    {
+        Ok(server) => server,
+        Err(e) => {
+            eprintln!(
+                "{}: Could not bind to the specified interface or port.\n\n{}",
+                "ERROR".red(),
+                e
+            );
+            std::process::exit(1)
+        }
+    };
+    server.serve(chat)
 }
 
 struct Chat<'a>(Name<'a>);
@@ -66,18 +76,51 @@ impl<'a> Chat<'a> {
 }
 
 impl ServerService for Chat<'_> {
-    fn run<'b>(&self, client: SocketAddr, question: DnsPacket<'b>) -> DnsPacket<'b> {
+    fn run<'b>(&self, client: SocketAddr, question: DnsPacket<'b>) -> Option<DnsPacket<'b>> {
         if question.header.questions > 0 {
             match question.questions[0].qtype {
-                QType::A => a::response(client, question, &self.0),
-                _ => todo!("Implement missing Question Types"),
+                QType::A => Some(a::response(client, question, &self.0)),
+                _ => Some(refused(question.header.id)),
             }
         } else {
-            todo!("Implement case without questions")
+            Some(refused(question.header.id))
         }
     }
 }
 
 fn any_ip() -> IpAddr {
     "0.0.0.0".parse().unwrap()
+}
+
+fn refused(id: u16) -> DnsPacket<'static> {
+    use dominion::*;
+
+    let flags = Flags {
+        qr: QueryResponse::Response,
+        opcode: OpCode::Query,
+        aa: AuthoritativeAnswer::Authoritative,
+        tc: TrunCation::NotTruncated,
+        rd: RecursionDesired::NotDesired,
+        ra: RecursionAvailable::NotAvailable,
+        z: Zero::Zero,
+        ad: AuthenticData::NotAuthentic,
+        cd: CheckingDisabled::Disabled,
+        rcode: ResponseCode::Refused,
+    };
+
+    let header = DnsHeader {
+        id,
+        flags,
+        questions: 0,
+        answers: 0,
+        authority: 0,
+        additional: 0,
+    };
+    DnsPacket {
+        header,
+        questions: vec![],
+        answers: vec![],
+        authority: vec![],
+        additional: vec![],
+    }
 }

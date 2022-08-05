@@ -21,7 +21,7 @@ pub fn serialize_request(c: &mut Criterion) {
 pub fn serialize_response(c: &mut Criterion) {
     let res = DnsPacket::try_from(&RES[..]).unwrap();
     let res = &res;
-    c.bench_function("serialize_req", |b| {
+    c.bench_function("serialize_res", |b| {
         b.iter(move || Vec::<u8>::from(black_box(res)))
     });
 }
