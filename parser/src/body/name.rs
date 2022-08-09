@@ -4,6 +4,9 @@
 
 use crate::binutils::*;
 use crate::ParseError;
+
+use thiserror::Error;
+
 use std::fmt;
 use std::iter::zip;
 use std::iter::Copied;
@@ -17,9 +20,34 @@ pub(crate) const MAX_JUMPS: u8 = 5;
 pub(crate) const MAX_LABEL_SIZE: usize = 63;
 pub(crate) const MAX_NAME_SIZE: usize = 255;
 
+/// An error was encountered when trying to work with a domain name
+#[derive(Error, Debug)]
+pub enum NameError {
+    /// Some label in the DNS packet it too long, overflowing the packet or not following the DNS specification.
+    #[error(
+        "Specified label length ({0}) is empty or is bigger than DNS specification (maximum {}).",
+        MAX_LABEL_SIZE
+    )]
+    LabelLength(usize),
+    /// Some label in one of the domain names is not valid because it contains characters that are not alphanumeric or `-`.
+    #[error("The provided label is not a valid domain name label")]
+    LabelContent,
+    /// One of the labels in the packet has a length that is bigger than the DNS specification.
+    #[error(
+        "Name length ({0}) is too long, is bigger than DNS specification (maximum {}).",
+        MAX_NAME_SIZE
+    )]
+    NameLength(usize),
+}
+
 /// A domain name represented as an inverted list of labels.
 #[derive(Clone)]
-pub struct Name<'a>(Vec<&'a str>);
+pub struct Name<'a> {
+    /// Domain name labels
+    labels: Vec<&'a str>,
+    /// Length of the domain name
+    len: u8,
+}
 
 type IterHuman<'a> = Rev<IterHierarchy<'a>>;
 type IterHierarchy<'a> = Copied<std::slice::Iter<'a, &'a str>>;
@@ -54,23 +82,19 @@ impl Default for Name<'_> {
 impl From<Name<'_>> for Vec<u8> {
     #[inline]
     fn from(name: Name<'_>) -> Self {
-        let mut out = Vec::with_capacity(name.0.len() * 8);
+        let mut out = Vec::with_capacity(name.len as _);
         name.serialize(&mut out);
         out
     }
 }
 
 impl<'a> TryFrom<&'a str> for Name<'a> {
-    type Error = ParseError;
+    type Error = NameError;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         let mut name = Name::default();
         for label in value.rsplit('.') {
-            if label.len() < MAX_LABEL_SIZE {
-                name.push_label(label);
-            } else {
-                Err(ParseError::LabelLength(label.len()))?
-            }
+            name.push_label(label)?;
         }
         Ok(name)
     }
@@ -86,10 +110,58 @@ impl<'a> Name<'a> {
     /// to be considered valid. Jump pointers should only point backwards inside the `buf`.
     #[inline]
     pub fn parse(buff: &'a [u8], pos: usize) -> Result<(Self, usize), ParseError> {
-        let (positions, n) = find_labels(buff, pos)?;
-        let name = parse_labels(buff, positions)?;
-        // TODO: Max name size
-        Ok((name, n))
+        let mut name = Name::new();
+        let blen = buff.len();
+        let (mut pos, mut size, mut jumps) = (pos, 0, 0);
+        loop {
+            if jumps > MAX_JUMPS {
+                Err(ParseError::ExcesiveJumps(jumps))?;
+            }
+            match read_label_metadata(buff, pos)? {
+                LabelMeta::Pointer(ptr) if ptr >= pos => Err(ParseError::InvalidJump)?,
+                LabelMeta::Size(s) if s > MAX_LABEL_SIZE => Err(NameError::LabelLength(s))?,
+                LabelMeta::Size(s) if blen <= pos + s => Err(NameError::LabelLength(s))?,
+                LabelMeta::Size(s) if name.len as usize + s > MAX_NAME_SIZE => {
+                    Err(NameError::NameLength(name.len as usize + s))?
+                }
+                LabelMeta::Size(s) if jumps == 0 => {
+                    name.push_bytes(&buff[pos + 1..pos + s + 1])?;
+                    pos += s + 1;
+                    size += s + 1;
+                }
+                LabelMeta::Size(s) => {
+                    name.push_bytes(&buff[pos + 1..pos + s + 1])?;
+                    pos += s + 1;
+                }
+                LabelMeta::Pointer(ptr) if jumps == 0 => {
+                    (pos, size, jumps) = (ptr, size + 2, jumps + 1);
+                }
+                LabelMeta::Pointer(ptr) => (pos, jumps) = (ptr, jumps + 1),
+                LabelMeta::End if jumps == 0 => {
+                    name.labels.reverse();
+                    return Ok((name, size + 1));
+                }
+                LabelMeta::End => {
+                    name.labels.reverse();
+                    return Ok((name, size));
+                }
+            }
+        }
+    }
+
+    /// Safely push a slice of bytes as as a subdomain label.
+    fn push_bytes(&mut self, bytes: &'a [u8]) -> Result<(), NameError> {
+        if valid_label(bytes) {
+            // SAFETY: Because we have verified that the label is only ASCII alphanumeric + `-`
+            // we now the label is valid UTF8.
+            let label = unsafe { str::from_utf8_unchecked(bytes) };
+            self.labels.push(label);
+            // SAFETY: It wont overflow because valid labels have a length that fits in one byte.
+            self.len += bytes.len() as u8 + 1;
+            Ok(())
+        } else {
+            Err(NameError::LabelContent)
+        }
     }
 
     /// Serialize the [Name] and append it tho the end of the provided `packet`
@@ -111,7 +183,10 @@ impl<'a> Name<'a> {
     /// ```
     #[inline]
     pub fn new() -> Self {
-        Name(Vec::with_capacity(INIT_NUM_LABELS))
+        Name {
+            labels: Vec::with_capacity(INIT_NUM_LABELS),
+            len: 0,
+        }
     }
 
     /// Obtain the top level domain (TLD) of the provided domain name.
@@ -123,23 +198,36 @@ impl<'a> Name<'a> {
     /// ```
     #[inline]
     pub fn tld(&self) -> Option<&str> {
-        self.0.first().copied()
+        self.labels.first().copied()
     }
 
-    /// Push a new label to the end of the domain name, as a subdomain of the current one. Empty
-    /// labels will be ignored.
+    /// Push a new label to the end of the domain name, as a subdomain of the current one.
+    ///
+    /// # Error
+    ///
+    /// Will error if the label is not a valid DNS label, or if the resulting Domain name is too big.
     ///
     /// ```
     /// # use dominion_parser::body::name::Name;
     /// let mut name = Name::new();
-    /// name.push_label("com");
-    /// name.push_label("example");
+    /// name.push_label("com").unwrap();
+    /// name.push_label("example").unwrap();
     /// assert_eq!(name.to_string(), "example.com.".to_string())
     /// ```
     #[inline]
-    pub fn push_label(&mut self, label: &'a str) {
-        if !label.is_empty() {
-            self.0.push(label);
+    pub fn push_label(&mut self, label: &'a str) -> Result<(), NameError> {
+        let len = label.len();
+        if label.is_empty() || len > MAX_LABEL_SIZE {
+            Err(NameError::LabelLength(len))
+        } else if len + self.len as usize > MAX_NAME_SIZE {
+            Err(NameError::NameLength(len + self.len as usize))
+        } else if !valid_label(label.as_bytes()) {
+            Err(NameError::LabelContent)
+        } else {
+            // SAFETY: It wont overflow because we have checked that the domain name length is not bigger than 255.
+            self.len += len as u8;
+            self.labels.push(label);
+            Ok(())
         }
     }
 
@@ -152,7 +240,7 @@ impl<'a> Name<'a> {
     /// ```
     #[inline]
     pub fn label_count(&self) -> usize {
-        self.0.len()
+        self.labels.len()
     }
 
     /// Check if `sub` is a subdomain of the current domain name.
@@ -166,7 +254,7 @@ impl<'a> Name<'a> {
     /// ```
     #[inline]
     pub fn is_subdomain(&self, sub: &Name<'_>) -> bool {
-        if self.0.len() > sub.0.len() {
+        if self.labels.len() > sub.labels.len() {
             false
         } else {
             zip(self.iter_hierarchy(), sub.iter_hierarchy()).fold(true, |acc, (x, y)| acc && x == y)
@@ -202,50 +290,17 @@ impl<'a> Name<'a> {
     /// ```
     #[inline]
     pub fn iter_hierarchy(&self) -> IterHierarchy<'_> {
-        self.0.iter().copied()
+        self.labels.iter().copied()
     }
 }
 
-type LabelsPositions = Vec<(usize, usize)>;
-
-#[inline]
-fn parse_labels(buff: &[u8], positions: LabelsPositions) -> Result<Name<'_>, ParseError> {
-    let mut name = Name::new();
-    for (pos, size) in positions.into_iter().rev() {
-        let label = str::from_utf8(&buff[pos..pos + size])?;
-        name.push_label(label);
-    }
-    Ok(name)
-}
-
-fn find_labels(buff: &[u8], pos: usize) -> Result<(LabelsPositions, usize), ParseError> {
-    let blen = buff.len();
-    let mut positions = LabelsPositions::with_capacity(INIT_NUM_LABELS);
-    let (mut pos, mut size, mut jumps) = (pos, 0, 0);
-    loop {
-        if jumps > MAX_JUMPS {
-            Err(ParseError::ExcesiveJumps(jumps))?;
-        }
-        match read_label_metadata(buff, pos)? {
-            LabelMeta::Size(s) if s > MAX_LABEL_SIZE => Err(ParseError::LabelLength(s))?,
-            LabelMeta::Size(s) if blen <= pos + s => Err(ParseError::LabelLength(s))?,
-            LabelMeta::Pointer(ptr) if ptr >= pos => Err(ParseError::InvalidJump)?,
-            LabelMeta::Size(s) if jumps == 0 => {
-                positions.push((pos + 1, s));
-                pos += s + 1;
-                size += s + 1;
-            }
-            LabelMeta::Size(s) => {
-                positions.push((pos + 1, s));
-                pos += s + 1;
-            }
-            LabelMeta::Pointer(ptr) if jumps == 0 => {
-                (pos, size, jumps) = (ptr, size + 2, jumps + 1);
-            }
-            LabelMeta::Pointer(ptr) => (pos, jumps) = (ptr, jumps + 1),
-            LabelMeta::End if jumps == 0 => return Ok((positions, size + 1)),
-            LabelMeta::End => return Ok((positions, size)),
-        }
+/// A label can only contain a `-` or alphanumeric characters, and must begin with a letter.
+fn valid_label(label: &[u8]) -> bool {
+    let mut bytes = label.iter();
+    if let Some(b) = bytes.next() && b.is_ascii_alphabetic() {
+        bytes.filter(|x| !matches!(x, b'-' | b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z')).count() == 0
+    } else {
+        false
     }
 }
 
@@ -275,30 +330,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn find_position_no_jumps() {
-        let buff = [
-            5, 104, 101, 108, 108, 111, // hello
-            5, 119, 111, 114, 108, 100, // world
-            3, 99, 111, 109, // com
-            0, 1, 1, 1, // <end>
-        ];
-        let (positions, n) = find_labels(&buff[..], 0).unwrap();
-        assert_eq!(n, 17);
-        assert_eq!(positions, vec![(1, 5), (7, 5), (13, 3)])
-    }
-
-    #[test]
-    fn find_position_with_jumps() {
-        let buff = [
-            5, 119, 111, 114, 108, 100, // world
-            3, 99, 111, 109, // com
-            0, 1, 1, 1, // <end>
-            5, 104, 101, 108, 108, 111, // hello
-            192, 0, 1, 1, 1, 1, 1, 1, // <jump to 0>
-        ];
-        let (positions, n) = find_labels(&buff[..], 14).unwrap();
-        assert_eq!(n, 8);
-        assert_eq!(positions, vec![(15, 5), (1, 5), (7, 3)])
+    fn valid_labels() {
+        let valid = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
+        let invalid = "hello.world";
+        assert!(valid_label(valid.as_bytes()));
+        assert!(!valid_label(invalid.as_bytes()));
     }
 
     #[test]
@@ -309,8 +345,7 @@ mod tests {
             3, 99, 111, 109, // com
             0, 1, 1, 1, // <end>
         ];
-        let (positions, n) = find_labels(&buff[..], 0).unwrap();
-        let name = parse_labels(&buff[..], positions).unwrap();
+        let (name, n) = Name::parse(&buff[..], 0).unwrap();
         assert_eq!(n, 17);
         assert_eq!(name.to_string(), "hello.world.com.".to_string())
     }
@@ -324,8 +359,7 @@ mod tests {
             5, 104, 101, 108, 108, 111, // hello
             192, 0, 1, 1, 1, 1, 1, 1, // <jump to 0>
         ];
-        let (positions, n) = find_labels(&buff[..], 14).unwrap();
-        let name = parse_labels(&buff[..], positions).unwrap();
+        let (name, n) = Name::parse(&buff[..], 14).unwrap();
         assert_eq!(n, 8);
         assert_eq!(name.to_string(), "hello.world.com.".to_string())
     }
@@ -361,9 +395,9 @@ mod tests {
     #[test]
     fn get_tld() {
         let mut name = Name::new();
-        name.push_label("com");
-        name.push_label("world");
-        name.push_label("hello");
+        name.push_label("com").unwrap();
+        name.push_label("world").unwrap();
+        name.push_label("hello").unwrap();
 
         let tld = name.tld();
         assert_eq!(tld, Some("com"));
@@ -373,7 +407,7 @@ mod tests {
     fn add_str_subdomain() {
         let buff = [5, 119, 111, 114, 108, 100, 3, 99, 111, 109, 0, 1, 1, 1]; // world.com
         let (mut name, _) = Name::parse(&buff[..], 0).unwrap();
-        name.push_label("hello");
+        name.push_label("hello").unwrap();
         assert_eq!(name.to_string(), "hello.world.com.".to_string())
     }
 
@@ -382,16 +416,16 @@ mod tests {
         let sub = String::from("hello");
         let buff = [5, 119, 111, 114, 108, 100, 3, 99, 111, 109, 0, 1, 1, 1]; // world.com
         let (mut name, _) = Name::parse(&buff[..], 0).unwrap();
-        name.push_label(&sub[..]);
+        name.push_label(&sub[..]).unwrap();
         assert_eq!(name.to_string(), "hello.world.com.".to_string())
     }
 
     #[test]
     fn iterate_human() {
         let mut name = Name::new();
-        name.push_label("com");
-        name.push_label("world");
-        name.push_label("hello");
+        name.push_label("com").unwrap();
+        name.push_label("world").unwrap();
+        name.push_label("hello").unwrap();
 
         let mut human = name.iter_human();
         assert_eq!(human.next(), Some("hello"));
@@ -402,9 +436,9 @@ mod tests {
     #[test]
     fn iterate_hierarchy() {
         let mut name = Name::new();
-        name.push_label("com");
-        name.push_label("world");
-        name.push_label("hello");
+        name.push_label("com").unwrap();
+        name.push_label("world").unwrap();
+        name.push_label("hello").unwrap();
 
         let mut human = name.iter_hierarchy();
         assert_eq!(human.next(), Some("com"));
@@ -415,13 +449,13 @@ mod tests {
     #[test]
     fn check_subdomain() {
         let mut parent = Name::new();
-        parent.push_label("com");
-        parent.push_label("world");
+        parent.push_label("com").unwrap();
+        parent.push_label("world").unwrap();
 
         let mut sub = Name::new();
-        sub.push_label("com");
-        sub.push_label("world");
-        sub.push_label("hello");
+        sub.push_label("com").unwrap();
+        sub.push_label("world").unwrap();
+        sub.push_label("hello").unwrap();
 
         assert!(parent.is_subdomain(&sub));
         assert!(!sub.is_subdomain(&parent));

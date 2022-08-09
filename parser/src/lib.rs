@@ -67,7 +67,6 @@
 //! }
 //! ```
 
-#![forbid(unsafe_code)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
@@ -200,24 +199,16 @@ pub enum ParseError {
         crate::body::name::MAX_JUMPS
     )]
     ExcesiveJumps(u8),
-    /// Some label in the DNS packet it too long, overflowing the packet or not following the DNS specification.
-    #[error("Specified label length ({0}) is too long, it overflows the rest of the packet or is bigger than DNS specification (maximum {}).",
-        crate::body::name::MAX_LABEL_SIZE
-    )]
-    LabelLength(usize),
     /// The DNS packet contains a label prefix that is not a length prefix or a pointer. Those values dont have a standard definition so are not implemented.
     #[error("Byte {0:#b} does not have a pointer or length prefix.")]
     LabelPrefix(u8),
-    /// One of the labels in the packet has a length that is bigger than the DNS specification.
-    #[error(
-        "Specified name length ({0}) is too long, is bigger than DNS specification (maximum {}).",
-        crate::body::name::MAX_NAME_SIZE
-    )]
-    NameLength(usize),
     /// The packet tried to cause an out-of-bound read.
     #[error("Out-of-bounds read attempt at position {0}")]
     OobRead(usize),
-    /// Some label in one of the domain names is not valid UTF-8.
-    #[error("Non UTF-8 label: {0}")]
+    /// Some text is not valid UTF-8.
+    #[error("Non UTF-8 text string: {0}")]
     NonUtf8(#[from] std::str::Utf8Error),
+    /// Error when parsing a domain name
+    #[error("Domain name could not be parsed: {0}")]
+    InvalidName(#[from] crate::body::name::NameError),
 }
