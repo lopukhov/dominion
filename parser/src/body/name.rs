@@ -296,12 +296,9 @@ impl<'a> Name<'a> {
 
 /// A label can only contain a `-` or alphanumeric characters, and must begin with a letter.
 fn valid_label(label: &[u8]) -> bool {
-    let mut bytes = label.iter();
-    if let Some(b) = bytes.next() && b.is_ascii_alphabetic() {
-        bytes.filter(|x| !matches!(x, b'-' | b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z')).count() == 0
-    } else {
-        false
-    }
+    label
+        .iter()
+        .all(|&b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 enum LabelMeta {

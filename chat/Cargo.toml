@@ -15,3 +15,6 @@ dominion = { path = "../dominion", version = "0.3"}
 argh = "0.1"
 num_cpus = "1"
 owo-colors = "3"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+toml = "0.5"

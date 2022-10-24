@@ -5,39 +5,57 @@
 #![forbid(unsafe_code)]
 #![warn(rust_2018_idioms, missing_debug_implementations)]
 
-use argh::FromArgs;
-use dominion::{DnsPacket, Name, QType, Server, ServerService};
-use owo_colors::OwoColorize;
-use std::net::{IpAddr, SocketAddr};
+use dominion_chat::Xor;
 
-mod a;
+use argh::FromArgs;
+use dominion::{Name, Server};
+use owo_colors::OwoColorize;
+use serde::Deserialize;
+use std::error::Error;
+use std::net::IpAddr;
+
+const CONFIG_FILE: &str = "./configuration.toml";
+
+/// Configuration for the DNS chat
+struct Configuration {
+    ip: IpAddr,
+    port: u16,
+    domain: String,
+    threads: usize,
+    xor: Option<Xor>,
+}
 
 #[derive(Clone, Debug, FromArgs)]
 /// Receive DNS messages from the world
 struct ChatArgs {
     /// number of threads in the thread pool
-    #[argh(option, short = 't', default = "num_cpus::get()")]
-    threads: usize,
+    #[argh(option, short = 't')]
+    threads: Option<usize>,
     /// UDP port to listen to
-    #[argh(option, short = 'p', default = "54")]
-    port: u16,
+    #[argh(option, short = 'p')]
+    port: Option<u16>,
     /// ip to listen to
-    #[argh(option, short = 'i', default = "any_ip()")]
-    ip: IpAddr,
+    #[argh(option, short = 'i')]
+    ip: Option<IpAddr>,
     /// domain name to use as a filter
     #[argh(option, short = 'd')]
     domain: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+/// Configuration from file
+struct RawConfig {
+    threads: Option<usize>,
+    ip: Option<IpAddr>,
+    port: Option<u16>,
+    domain: Option<String>,
+    xor: Option<Xor>,
+}
+
 fn main() {
-    let args: ChatArgs = argh::from_env();
+    let config = configuration();
 
-    let name = match args.domain {
-        Some(domain) => domain,
-        None => "".to_string(),
-    };
-
-    let name = match Name::try_from(name.as_ref()) {
+    let name = match Name::try_from(config.domain.as_ref()) {
         Ok(name) => name,
         Err(_) => {
             eprintln!(
@@ -48,11 +66,11 @@ fn main() {
         }
     };
 
-    let chat = Chat::new(name);
+    let chat = dominion_chat::Chat::new(name, config.xor);
 
     let server = match Server::default()
-        .threads(args.threads)
-        .bind((args.ip, args.port).into())
+        .threads(config.threads)
+        .bind((config.ip, config.port).into())
     {
         Ok(server) => server,
         Err(e) => {
@@ -67,60 +85,45 @@ fn main() {
     server.serve(chat)
 }
 
-struct Chat<'a>(Name<'a>);
-
-impl<'a> Chat<'a> {
-    fn new(name: Name<'a>) -> Self {
-        Chat(name)
-    }
-}
-
-impl ServerService for Chat<'_> {
-    fn run<'b>(&self, client: SocketAddr, question: DnsPacket<'b>) -> Option<DnsPacket<'b>> {
-        if question.header.questions > 0 {
-            match question.questions[0].qtype {
-                QType::A => Some(a::response(client, question, &self.0)),
-                _ => Some(refused(question.header.id)),
-            }
-        } else {
-            Some(refused(question.header.id))
+macro_rules! select_cfg {
+    ($arg:expr, $conf:expr, $default:expr) => {
+        match ($arg, $conf) {
+            (Some(a), _) => a,
+            (None, Some(c)) => c,
+            (None, None) => $default,
         }
+    };
+}
+
+fn configuration() -> Configuration {
+    let args: ChatArgs = argh::from_env();
+    let config = match read_config() {
+        Ok(cfg) => cfg,
+        Err(_) => RawConfig {
+            threads: None,
+            ip: None,
+            port: None,
+            domain: None,
+            xor: None,
+        },
+    };
+
+    let ip = select_cfg!(args.ip, config.ip, "0.0.0.0".parse().unwrap());
+    let port = select_cfg!(args.port, config.port, 53);
+    let domain = select_cfg!(args.domain, config.domain, String::new());
+    let threads = select_cfg!(args.threads, config.threads, num_cpus::get());
+
+    Configuration {
+        ip,
+        port,
+        domain,
+        threads,
+        xor: config.xor,
     }
 }
 
-fn any_ip() -> IpAddr {
-    "0.0.0.0".parse().unwrap()
-}
-
-fn refused(id: u16) -> DnsPacket<'static> {
-    use dominion::*;
-
-    let flags = Flags {
-        qr: QueryResponse::Response,
-        opcode: OpCode::Query,
-        aa: AuthoritativeAnswer::Authoritative,
-        tc: TrunCation::NotTruncated,
-        rd: RecursionDesired::NotDesired,
-        ra: RecursionAvailable::NotAvailable,
-        z: Zero::Zero,
-        ad: AuthenticData::NotAuthentic,
-        cd: CheckingDisabled::Disabled,
-        rcode: ResponseCode::Refused,
-    };
-
-    let header = DnsHeader {
-        id,
-        flags,
-        questions: 0,
-        answers: 0,
-        authority: 0,
-        additional: 0,
-    };
-    DnsPacket {
-        header,
-        questions: vec![],
-        answers: vec![],
-        authority: vec![],
-        additional: vec![],
-    }
+fn read_config() -> Result<RawConfig, Box<dyn Error>> {
+    let config = std::fs::read_to_string(CONFIG_FILE)?;
+    let config = toml::from_str(&config)?;
+    Ok(config)
 }

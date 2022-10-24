@@ -7,18 +7,30 @@ use std::net::SocketAddr;
 
 use dominion::{DnsHeader, DnsPacket, Flags, Name, ResourceRecord};
 
-pub fn response<'a>(
+pub(crate) fn response<'a>(
     client: SocketAddr,
     question: DnsPacket<'a>,
     filter: &Name<'_>,
+    xor: &Option<crate::Xor>,
 ) -> DnsPacket<'a> {
     let name = question.questions[0].name.clone();
     if filter.is_subdomain(&name) {
-        let label = name.iter_hierarchy().nth(filter.label_count());
-        print(
-            client,
-            label.expect("Because it is a subdomain it should have at least one more label"),
-        );
+        let mut labels = name.iter_hierarchy();
+        let label = labels
+            .nth(filter.label_count())
+            .expect("Because it is a subdomain it should have at least one more label");
+        let signal = labels.next();
+
+        match (signal, xor) {
+            (Some(sig), Some(xor)) if sig == xor.signal => {
+                if let Some(label) = decrypt(label, xor.key) {
+                    encrypted(client, &label);
+                } else {
+                    clear(client, label)
+                }
+            }
+            (_, _) => clear(client, label),
+        }
     }
 
     let header = DnsHeader {
@@ -38,9 +50,22 @@ pub fn response<'a>(
     }
 }
 
-fn print(client: SocketAddr, label: &str) {
+fn decrypt(label: impl AsRef<[u8]>, key: u8) -> Option<String> {
+    let mut bytes = hex::decode(label).ok()?;
+    for i in 0..bytes.len() {
+        bytes[i] ^= key
+    }
+    Some(String::from_utf8_lossy(&bytes).into())
+}
+
+fn clear(client: SocketAddr, label: &str) {
     let red = format!("{} says:", client.ip());
     println!("✉️  {}\n\n\t{}\n\n", red.red(), label);
+}
+
+fn encrypted(client: SocketAddr, label: &str) {
+    let red = format!("{} says:", client.ip());
+    println!("🔒 {}\n\n\t{}\n\n", red.red(), label);
 }
 
 fn flags() -> Flags {
