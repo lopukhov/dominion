@@ -419,7 +419,7 @@ mod tests {
         let buff = [
             0x12u8, 0x34u8, 0u8, 0u8, 0u8, 1u8, 0u8, 1u8, 0u8, 1u8, 0u8, 1u8,
         ];
-        if let Ok(_) = DnsHeader::try_from(&buff[..5]) {
+        if DnsHeader::try_from(&buff[..5]).is_ok() {
             panic!("Test should error with small buffer");
         }
     }

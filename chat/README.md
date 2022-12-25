@@ -3,16 +3,20 @@
 
 DNS chat server for fun and profit
 
-Running the following command:
+Messages can be sent in clear text or xor encrypted:
 
-```
-sh-5.1$ dig @127.0.0.1 -p 5353 hello-world.example.com +short
-127.0.0.1
+```sh
+$ dig @127.0.0.1 -p 5533 hello-world.example.com
+$ dig @127.0.0.1 -p 5533 xor.6b666f6f6c23706660716677.example.com
 ```
 
-Gives:
+Giving:
 
 ![dominion-chat](https://github.com/lopukhov/dominion/raw/HEAD/chat/assets/dominion-chat-hello-world.png)
+
+A file can also be requested, getting its encrypted contents:
+
+![dominion-chat](https://github.com/lopukhov/dominion/raw/HEAD/chat/assets/dominion-chat-txt.png)
 
 # Usage
 
@@ -27,4 +31,27 @@ Options:
   -i, --ip          ip to listen to
   -d, --domain      domain name to use as a filter
   --help            display usage information
+```
+
+# Configuration file
+
+If a file called `configuration.toml` exists in the current directory it will be read to configure `dominion-chat`.
+
+Example:
+
+```toml
+ip = "0.0.0.0"
+port = 5353
+domain = "example.com"
+threads = 1
+
+[xor]
+key = 3
+signal = "test"
+
+[files]
+this = "test1.txt"
+is = "test2.txt"
+an = "test3.txt"
+example = "test4.txt"
 ```

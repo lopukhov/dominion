@@ -2,32 +2,41 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![forbid(unsafe_code)]
 #![warn(rust_2018_idioms, missing_debug_implementations)]
 
 use dominion::{DnsPacket, Name, QType, ServerService};
 use serde::Deserialize;
-use std::net::SocketAddr;
+use std::{collections::BTreeMap, net::SocketAddr};
 
 mod a;
+mod txt;
 
 #[derive(Debug)]
 pub struct Chat<'a> {
     domain: Name<'a>,
     xor: Option<Xor>,
+    files: Option<txt::TxtHandler>,
 }
 
 impl<'a> Chat<'a> {
-    pub fn new(name: Name<'a>, xor: Option<Xor>) -> Self {
-        Chat { domain: name, xor }
+    pub fn new(name: Name<'a>, xor: Option<Xor>, files: Option<BTreeMap<String, String>>) -> Self {
+        let files = files.map(|f| txt::TxtHandler::new(f.into_iter()));
+        Chat {
+            domain: name,
+            files,
+            xor,
+        }
     }
 }
 
 impl ServerService for Chat<'_> {
-    fn run<'a>(&self, client: SocketAddr, question: DnsPacket<'a>) -> Option<DnsPacket<'a>> {
+    fn run<'a>(&self, client: SocketAddr, question: &'a DnsPacket<'a>) -> Option<DnsPacket<'a>> {
         if question.header.questions > 0 {
             match question.questions[0].qtype {
                 QType::A => Some(a::response(client, question, &self.domain, &self.xor)),
+                QType::Txt => {
+                    self.files.as_ref().map(|files| files.response(question, &self.domain, &self.xor))
+                }
                 _ => Some(refused(question.header.id)),
             }
         } else {

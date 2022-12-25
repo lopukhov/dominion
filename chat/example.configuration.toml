@@ -1,0 +1,14 @@
+ip = "0.0.0.0"
+port = 5353
+domain = "example.com"
+threads = 1
+
+[xor]
+key = 3
+signal = "test"
+
+[files]
+this = "test1.txt"
+is = "test2.txt"
+an = "test3.txt"
+example = "test4.txt"

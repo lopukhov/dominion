@@ -18,3 +18,4 @@ owo-colors = "3"
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 toml = "0.5"
+memmap2 = "0.5"

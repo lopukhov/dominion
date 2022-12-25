@@ -9,7 +9,7 @@ use dominion::{DnsHeader, DnsPacket, Flags, Name, ResourceRecord};
 
 pub(crate) fn response<'a>(
     client: SocketAddr,
-    question: DnsPacket<'a>,
+    question: &'a DnsPacket<'a>,
     filter: &Name<'_>,
     xor: &Option<crate::Xor>,
 ) -> DnsPacket<'a> {
@@ -44,7 +44,7 @@ pub(crate) fn response<'a>(
     };
     DnsPacket {
         header,
-        questions: question.questions,
+        questions: question.questions.clone(),
         answers: vec![answer(name)],
         authority: vec![],
         additional: vec![],

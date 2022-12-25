@@ -11,6 +11,7 @@ use argh::FromArgs;
 use dominion::{Name, Server};
 use owo_colors::OwoColorize;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::net::IpAddr;
 
@@ -23,6 +24,7 @@ struct Configuration {
     domain: String,
     threads: usize,
     xor: Option<Xor>,
+    files: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Debug, FromArgs)]
@@ -50,6 +52,7 @@ struct RawConfig {
     port: Option<u16>,
     domain: Option<String>,
     xor: Option<Xor>,
+    files: Option<BTreeMap<String, String>>,
 }
 
 fn main() {
@@ -66,7 +69,7 @@ fn main() {
         }
     };
 
-    let chat = dominion_chat::Chat::new(name, config.xor);
+    let chat = dominion_chat::Chat::new(name, config.xor, config.files);
 
     let server = match Server::default()
         .threads(config.threads)
@@ -105,6 +108,7 @@ fn configuration() -> Configuration {
             port: None,
             domain: None,
             xor: None,
+            files: None,
         },
     };
 
@@ -119,6 +123,7 @@ fn configuration() -> Configuration {
         domain,
         threads,
         xor: config.xor,
+        files: config.files,
     }
 }
 

@@ -7,8 +7,8 @@ use dominion_parser::DnsPacket;
 
 use pprof::criterion::{Output, PProfProfiler};
 
-const REQ: &'static [u8; 33] = include_bytes!("../assets/dns_request.bin");
-const RES: &'static [u8; 49] = include_bytes!("../assets/dns_response.bin");
+const REQ: &[u8; 33] = include_bytes!("../assets/dns_request.bin");
+const RES: &[u8; 49] = include_bytes!("../assets/dns_response.bin");
 
 pub fn serialize_request(c: &mut Criterion) {
     let req = DnsPacket::try_from(&REQ[..]).unwrap();

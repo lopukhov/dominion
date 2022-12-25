@@ -7,10 +7,10 @@ use dominion_parser::DnsPacket;
 
 use pprof::criterion::{Output, PProfProfiler};
 
-const REQ: &'static [u8; 33] = include_bytes!("../assets/dns_request.bin");
-const RES: &'static [u8; 49] = include_bytes!("../assets/dns_response.bin");
+const REQ: &[u8; 33] = include_bytes!("../assets/dns_request.bin");
+const RES: &[u8; 49] = include_bytes!("../assets/dns_response.bin");
 
-const LONG_REQ: &'static [u8; 270] = include_bytes!("../assets/dns_longreq.bin");
+const LONG_REQ: &[u8; 270] = include_bytes!("../assets/dns_longreq.bin");
 
 pub fn parse_long_request(c: &mut Criterion) {
     c.bench_function("parse_longreq", |b| {

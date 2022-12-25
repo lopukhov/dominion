@@ -8,8 +8,8 @@ use dominion_parser::body::{RecordData, RecordPreamble, ResourceRecord};
 use dominion_parser::header::{AuthenticData, QueryResponse, RecursionAvailable};
 use dominion_parser::DnsPacket;
 
-const REQ: &'static [u8; 33] = include_bytes!("../assets/dns_request.bin");
-const RES: &'static [u8; 49] = include_bytes!("../assets/dns_response.bin");
+const REQ: &[u8; 33] = include_bytes!("../assets/dns_request.bin");
+const RES: &[u8; 49] = include_bytes!("../assets/dns_response.bin");
 
 fn main() {
     let mut res = DnsPacket::try_from(&REQ[..]).unwrap();
