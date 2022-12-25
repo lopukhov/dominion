@@ -6,7 +6,7 @@ DNS chat server for fun and profit
 Running the following command:
 
 ```
-sh-5.1$ dig @127.0.0.1 -p 5454 hello-world.example.com +short
+sh-5.1$ dig @127.0.0.1 -p 5353 hello-world.example.com +short
 127.0.0.1
 ```
 

@@ -19,7 +19,7 @@
 //! }
 //!
 //! Server::default()
-//!         .bind("127.0.0.1:5454".parse().unwrap())
+//!         .bind("127.0.0.1:5353".parse().unwrap())
 //!         .unwrap()
 //!         .serve(Echo);
 //! ```

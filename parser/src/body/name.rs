@@ -251,7 +251,7 @@ impl<'a> Name<'a> {
     /// ```
     #[inline]
     pub fn is_subdomain(&self, sub: &Name<'_>) -> bool {
-        if self.labels.len() > sub.labels.len() {
+        if self.labels.len() >= sub.labels.len() {
             false
         } else {
             zip(self.iter_hierarchy(), sub.iter_hierarchy()).fold(true, |acc, (x, y)| acc && x == y)

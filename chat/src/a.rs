@@ -100,3 +100,16 @@ fn answer(name: Name<'_>) -> ResourceRecord<'_> {
         data: dominion::RecordData::A("127.0.0.1".parse().unwrap()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decrypt_xor() {
+        let key = 0x5;
+        let bytes = "71607671257d6a7725616066777c7571";
+        let plain = decrypt(bytes, key);
+        assert_eq!(Some("test xor decrypt".to_string()), plain)
+    }
+}

@@ -24,7 +24,7 @@ impl<'a> Chat<'a> {
 }
 
 impl ServerService for Chat<'_> {
-    fn run<'b>(&self, client: SocketAddr, question: DnsPacket<'b>) -> Option<DnsPacket<'b>> {
+    fn run<'a>(&self, client: SocketAddr, question: DnsPacket<'a>) -> Option<DnsPacket<'a>> {
         if question.header.questions > 0 {
             match question.questions[0].qtype {
                 QType::A => Some(a::response(client, question, &self.domain, &self.xor)),
