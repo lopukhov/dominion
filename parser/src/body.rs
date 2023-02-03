@@ -8,6 +8,7 @@ pub mod name;
 use crate::binutils::*;
 use crate::body::name::Name;
 use crate::ParseError;
+use std::borrow::Cow;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str;
 
@@ -293,11 +294,11 @@ pub enum RecordData<'a> {
         exchange: Name<'a>,
     },
     /// Text strings
-    Txt(&'a str),
+    Txt(Cow<'a, str>),
     /// A host address IPv6
     Aaaa(Ipv6Addr),
     /// ?: A value has been received that does not correspond to any known type.
-    Unknown(&'a [u8]),
+    Unknown(Cow<'a, [u8]>),
 }
 
 impl<'a> RecordData<'a> {
@@ -329,10 +330,8 @@ impl<'a> RecordData<'a> {
             }
             Type::Txt => {
                 let len = safe_u8_read(buff, pos)?;
-                Ok((
-                    Self::Txt(str::from_utf8(&buff[pos..pos + len as usize])?),
-                    len as _,
-                ))
+                let str_bytes = str::from_utf8(&buff[pos..pos + len as usize])?;
+                Ok((Self::Txt(Cow::from(str_bytes)), len as _))
             }
             Type::Aaaa => Ok((Self::Aaaa(safe_ipv6_read(buff, pos)?), 16)),
             Type::Unknown(_) => {
@@ -341,13 +340,15 @@ impl<'a> RecordData<'a> {
                 if buff.len() < end {
                     Err(ParseError::OobRead(end))?
                 }
-                Ok((Self::Unknown(&buff[pos..end]), len))
+                let cow_bytes = Cow::from(&buff[pos..end]);
+                Ok((Self::Unknown(cow_bytes), len))
             }
         }
     }
 
     #[inline]
     fn serialize(&self, packet: &mut Vec<u8>) {
+        use std::ops::Deref;
         match self {
             Self::A(ip) => packet.extend(ip.octets()),
             Self::Ns(name) => name.serialize(packet),
@@ -364,7 +365,7 @@ impl<'a> RecordData<'a> {
                 packet.extend(txt.as_bytes());
             }
             Self::Aaaa(ip) => packet.extend(ip.octets()),
-            Self::Unknown(buff) => packet.extend(*buff),
+            Self::Unknown(buff) => packet.extend(buff.deref()),
         }
     }
 }

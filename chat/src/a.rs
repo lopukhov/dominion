@@ -13,6 +13,7 @@ pub(crate) fn response<'a>(
     filter: &Name<'_>,
     xor: &Option<crate::Xor>,
 ) -> DnsPacket<'a> {
+    use std::ops::Deref;
     let name = question.questions[0].name.clone();
     if filter.is_subdomain(&name) {
         let mut labels = name.iter_hierarchy();
@@ -23,7 +24,7 @@ pub(crate) fn response<'a>(
 
         match (signal, xor) {
             (Some(sig), Some(xor)) if sig == xor.signal => {
-                if let Some(label) = decrypt(label, xor.key) {
+                if let Some(label) = decrypt(label.deref(), xor.key) {
                     encrypted(client, &label);
                 } else {
                     clear(client, label)
@@ -52,13 +53,13 @@ pub(crate) fn response<'a>(
 
 fn decrypt(label: impl AsRef<[u8]>, key: u8) -> Option<String> {
     let mut bytes = hex::decode(label).ok()?;
-    for i in 0..bytes.len() {
-        bytes[i] ^= key
+    for b in &mut bytes {
+        *b ^= key
     }
     Some(String::from_utf8_lossy(&bytes).into())
 }
 
-fn clear(client: SocketAddr, label: &str) {
+fn clear(client: SocketAddr, label: &'_ str) {
     let red = format!("{} says:", client.ip());
     println!("✉️  {}\n\n\t{}\n\n", red.red(), label);
 }

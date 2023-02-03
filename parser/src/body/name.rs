@@ -7,10 +7,10 @@ use crate::ParseError;
 
 use thiserror::Error;
 
+use std::borrow::Cow;
 use std::fmt;
 use std::iter::zip;
-use std::iter::Copied;
-use std::iter::Rev;
+use std::ops::Deref;
 use std::str;
 
 const INIT_NUM_LABELS: usize = 8;
@@ -44,13 +44,10 @@ pub enum NameError {
 #[derive(Clone)]
 pub struct Name<'a> {
     /// Domain name labels
-    labels: Vec<&'a str>,
+    labels: Vec<Cow<'a, str>>,
     /// Length of the domain name
     len: u8,
 }
-
-type IterHuman<'a> = Rev<IterHierarchy<'a>>;
-type IterHierarchy<'a> = Copied<std::slice::Iter<'a, &'a str>>;
 
 impl fmt::Display for Name<'_> {
     #[inline]
@@ -94,7 +91,7 @@ impl<'a> TryFrom<&'a str> for Name<'a> {
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         let mut name = Name::default();
         for label in value.rsplit('.') {
-            name.push_label(label)?;
+            name.push_label(label.into())?;
         }
         Ok(name)
     }
@@ -155,7 +152,7 @@ impl<'a> Name<'a> {
             // SAFETY: Because we have verified that the label is only ASCII alphanumeric + `-`
             // we now the label is valid UTF8.
             let label = unsafe { str::from_utf8_unchecked(bytes) };
-            self.labels.push(label);
+            self.labels.push(label.into());
             // SAFETY: It wont overflow because valid labels have a length that fits in one byte.
             self.len += bytes.len() as u8 + 1;
             Ok(())
@@ -197,8 +194,8 @@ impl<'a> Name<'a> {
     /// assert_eq!(name.tld(), Some("com"))
     /// ```
     #[inline]
-    pub fn tld(&self) -> Option<&str> {
-        self.labels.first().copied()
+    pub fn tld(&self) -> Option<&'_ str> {
+        self.labels.first().map(|cow| cow.deref())
     }
 
     /// Push a new label to the end of the domain name, as a subdomain of the current one.
@@ -210,12 +207,12 @@ impl<'a> Name<'a> {
     /// ```
     /// # use dominion_parser::body::name::Name;
     /// let mut name = Name::new();
-    /// name.push_label("com").unwrap();
-    /// name.push_label("example").unwrap();
+    /// name.push_label("com".into()).unwrap();
+    /// name.push_label("example".into()).unwrap();
     /// assert_eq!(name.to_string(), "example.com.".to_string())
     /// ```
     #[inline]
-    pub fn push_label(&mut self, label: &'a str) -> Result<(), NameError> {
+    pub fn push_label(&mut self, label: Cow<'a, str>) -> Result<(), NameError> {
         let len = label.len();
         if label.is_empty() || len > MAX_LABEL_SIZE {
             Err(NameError::LabelLength(len))
@@ -273,7 +270,7 @@ impl<'a> Name<'a> {
     /// assert_eq!(human.next(), Some("com"));
     /// ```
     #[inline]
-    pub fn iter_human(&self) -> IterHuman<'_> {
+    pub fn iter_human(&self) -> impl DoubleEndedIterator<Item = &'_ str> {
         self.iter_hierarchy().rev()
     }
 
@@ -289,8 +286,8 @@ impl<'a> Name<'a> {
     /// assert_eq!(hierarchy.next(), Some("subdomain"));
     /// ```
     #[inline]
-    pub fn iter_hierarchy(&self) -> IterHierarchy<'_> {
-        self.labels.iter().copied()
+    pub fn iter_hierarchy(&self) -> impl DoubleEndedIterator<Item = &'_ str> {
+        self.labels.iter().map(|cow| cow.deref())
     }
 }
 
@@ -392,9 +389,9 @@ mod tests {
     #[test]
     fn get_tld() {
         let mut name = Name::new();
-        name.push_label("com").unwrap();
-        name.push_label("world").unwrap();
-        name.push_label("hello").unwrap();
+        name.push_label("com".into()).unwrap();
+        name.push_label("world".into()).unwrap();
+        name.push_label("hello".into()).unwrap();
 
         let tld = name.tld();
         assert_eq!(tld, Some("com"));
@@ -404,7 +401,7 @@ mod tests {
     fn add_str_subdomain() {
         let buff = [5, 119, 111, 114, 108, 100, 3, 99, 111, 109, 0, 1, 1, 1]; // world.com
         let (mut name, _) = Name::parse(&buff[..], 0).unwrap();
-        name.push_label("hello").unwrap();
+        name.push_label("hello".into()).unwrap();
         assert_eq!(name.to_string(), "hello.world.com.".to_string())
     }
 
@@ -413,16 +410,16 @@ mod tests {
         let sub = String::from("hello");
         let buff = [5, 119, 111, 114, 108, 100, 3, 99, 111, 109, 0, 1, 1, 1]; // world.com
         let (mut name, _) = Name::parse(&buff[..], 0).unwrap();
-        name.push_label(&sub[..]).unwrap();
+        name.push_label(sub.into()).unwrap();
         assert_eq!(name.to_string(), "hello.world.com.".to_string())
     }
 
     #[test]
     fn iterate_human() {
         let mut name = Name::new();
-        name.push_label("com").unwrap();
-        name.push_label("world").unwrap();
-        name.push_label("hello").unwrap();
+        name.push_label("com".into()).unwrap();
+        name.push_label("world".into()).unwrap();
+        name.push_label("hello".into()).unwrap();
 
         let mut human = name.iter_human();
         assert_eq!(human.next(), Some("hello"));
@@ -433,9 +430,9 @@ mod tests {
     #[test]
     fn iterate_hierarchy() {
         let mut name = Name::new();
-        name.push_label("com").unwrap();
-        name.push_label("world").unwrap();
-        name.push_label("hello").unwrap();
+        name.push_label("com".into()).unwrap();
+        name.push_label("world".into()).unwrap();
+        name.push_label("hello".into()).unwrap();
 
         let mut human = name.iter_hierarchy();
         assert_eq!(human.next(), Some("com"));
@@ -446,13 +443,13 @@ mod tests {
     #[test]
     fn check_subdomain() {
         let mut parent = Name::new();
-        parent.push_label("com").unwrap();
-        parent.push_label("world").unwrap();
+        parent.push_label("com".into()).unwrap();
+        parent.push_label("world".into()).unwrap();
 
         let mut sub = Name::new();
-        sub.push_label("com").unwrap();
-        sub.push_label("world").unwrap();
-        sub.push_label("hello").unwrap();
+        sub.push_label("com".into()).unwrap();
+        sub.push_label("world".into()).unwrap();
+        sub.push_label("hello".into()).unwrap();
 
         assert!(parent.is_subdomain(&sub));
         assert!(!sub.is_subdomain(&parent));
