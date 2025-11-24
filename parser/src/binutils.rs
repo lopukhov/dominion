@@ -19,7 +19,7 @@ fn safe_read<const N: usize>(buff: &[u8], pos: usize) -> Result<[u8; N], ParseEr
 
 #[inline]
 pub(crate) fn safe_u8_read(buff: &[u8], pos: usize) -> Result<u8, ParseError> {
-    buff.get(pos).ok_or(ParseError::OobRead(pos)).map(|n| *n)
+    buff.get(pos).ok_or(ParseError::OobRead(pos)).copied()
 }
 
 #[inline]

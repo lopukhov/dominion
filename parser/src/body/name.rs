@@ -254,7 +254,8 @@ impl<'a> Name<'a> {
         if self.labels.len() >= sub.labels.len() {
             false
         } else {
-            zip(self.iter_hierarchy(), sub.iter_hierarchy()).fold(true, |acc, (x, y)| acc && x == y)
+            zip(self.iter_hierarchy(), sub.iter_hierarchy())
+                .fold(true, |acc, (x, y)| acc && x.eq_ignore_ascii_case(y))
         }
     }
 
