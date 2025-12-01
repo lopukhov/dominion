@@ -16,20 +16,24 @@ pub(crate) fn response<'a>(
     let name = question.questions[0].name.clone();
     if filter.is_subdomain(&name) {
         let mut labels = name.iter_hierarchy();
-        let label = labels
+        let signal = labels
             .nth(filter.label_count())
             .expect("Because it is a subdomain it should have at least one more label");
-        let signal = labels.next();
+        let text: String = labels.rev().collect();
 
-        match (signal, xor) {
-            (Some(sig), Some(xor)) if sig == xor.signal => {
-                if let Some(label) = decrypt(label, xor.key) {
-                    encrypted(client, &label);
+        match xor {
+            Some(xor) if signal == xor.signal => {
+                if let Some(text) = decrypt(&text, xor.key) {
+                    encrypted(client, &text);
                 } else {
-                    clear(client, label)
+                    let text = format!("Cannot decrypt {text}");
+                    clear(client, &text)
                 }
             }
-            (_, _) => clear(client, label),
+            _ => {
+                let text = format!("{text}{signal}");
+                clear(client, &text)
+            }
         }
     }
 
