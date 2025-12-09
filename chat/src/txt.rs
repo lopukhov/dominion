@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, path::Path, str};
 
 use dominion::{DnsHeader, DnsPacket, Flags, Name, ResourceRecord};
 
@@ -43,35 +43,44 @@ impl TxtHandler {
     ) -> DnsPacket<'a> {
         let id = question.header.id;
         let name = &question.questions[0].name;
-        if filter.is_subdomain(name) && xor.is_some() {
-            let xor = xor.as_ref().unwrap();
-            let mut labels = name.iter_hierarchy();
-            let label = labels
-                .nth(filter.label_count())
-                .expect("Because it is a subdomain it should have at least one more label");
 
-            let chunk = self.read_chunk(label).map(|l| encrypt(l, xor.key));
-            if let Some(chunk) = chunk {
-                let header = DnsHeader {
-                    id,
-                    flags: flags(),
-                    questions: 1,
-                    answers: 1,
-                    authority: 0,
-                    additional: 0,
-                };
-                DnsPacket {
-                    header,
-                    questions: question.questions.clone(),
-                    answers: vec![answer(name, chunk)],
-                    authority: vec![],
-                    additional: vec![],
-                }
-            } else {
-                super::refused(id)
-            }
-        } else {
-            super::refused(id)
+        // Si no es un subdominio no es una petición nuestra
+        if !filter.is_subdomain(name) {
+            return super::refused(id);
+        }
+
+        // Obtenemos la clave del subdominio
+        let mut labels = name.iter_hierarchy();
+        let label = labels
+            .nth(filter.label_count())
+            .expect("Because it is a subdomain it should have at least one more label");
+
+        // Si no podemos leer el cacho es que algo ha ido mal y rechazamos
+        // la solicitud.
+        let Some(chunk) = self.read_chunk(label) else {
+            return super::refused(id);
+        };
+        let chunk = match xor {
+            Some(xor) => encrypt(chunk, xor.key),
+            None => str::from_utf8(chunk)
+                .expect("clear text files can only be text")
+                .to_string(),
+        };
+
+        let header = DnsHeader {
+            id,
+            flags: flags(),
+            questions: 1,
+            answers: 1,
+            authority: 0,
+            additional: 0,
+        };
+        DnsPacket {
+            header,
+            questions: question.questions.clone(),
+            answers: vec![answer(name, chunk)],
+            authority: vec![],
+            additional: vec![],
         }
     }
 
@@ -86,7 +95,7 @@ impl TxtHandler {
         }
 
         let (file, i) = parse_key(key)?;
-        let map = self.files.get(file)?;
+        let map = self.files.get(&file.to_ascii_lowercase())?;
         let i = i * MAX_TXT_SIZE / 2;
         let j = min(map.len(), i + MAX_TXT_SIZE / 2);
         map.get(i..j)
