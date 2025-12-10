@@ -16,23 +16,21 @@ pub(crate) struct TxtHandler {
 }
 
 impl TxtHandler {
-    pub fn new<I, P>(mapping: I) -> Self
+    pub fn new<I, P>(mapping: I) -> Result<Self, &'static str>
     where
         I: Iterator<Item = (String, P)>,
         P: AsRef<Path>,
     {
         use std::fs::File;
-        // TODO: better error handling
-        let files = mapping
-            .map(|(k, p)| {
-                let fd = File::open(p).expect("could not open a file");
-                // SAFETY: Because we copy the bytes from the appropiate part of the file
-                // before we use them a change in the underlying file will not produce UB
-                let v = unsafe { Mmap::map(&fd).expect("could not read the file") };
-                (k, v)
-            })
-            .collect();
-        Self { files }
+        let mut files = BTreeMap::new();
+        for (k, p) in mapping {
+            let fd = File::open(p).map_err(|_| "could not open a file")?;
+            // SAFETY: Because we copy the bytes from the appropiate part of the file
+            // before we use them, a change in the underlying file will not produce UB
+            let v = unsafe { Mmap::map(&fd).map_err(|_| "could not read the file")? };
+            files.insert(k, v);
+        }
+        Ok(Self { files })
     }
 
     pub fn response<'a>(

@@ -21,15 +21,24 @@ pub struct Chat<'a> {
 type SMap = BTreeMap<String, String>;
 
 impl<'a> Chat<'a> {
-    pub fn new(name: Name<'a>, xor: Option<Xor>, files: Option<SMap>, answers: SMap) -> Self {
+    pub fn new(
+        name: Name<'a>,
+        xor: Option<Xor>,
+        files: Option<SMap>,
+        answers: SMap,
+    ) -> Result<Self, &'static str> {
         let answers = a::AHandler::new(answers);
-        let files = files.map(|f| txt::TxtHandler::new(f.into_iter()));
-        Chat {
+        let files = if let Some(files) = files {
+            Some(txt::TxtHandler::new(files.into_iter())?)
+        } else {
+            None
+        };
+        Ok(Chat {
             domain: name,
             files,
             answers,
             xor,
-        }
+        })
     }
 }
 

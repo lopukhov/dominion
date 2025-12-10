@@ -71,7 +71,16 @@ fn main() {
         }
     };
 
-    let chat = dominion_chat::Chat::new(name, config.xor, config.files, config.answers);
+    let chat = match dominion_chat::Chat::new(name, config.xor, config.files, config.answers) {
+        Ok(chat) => chat,
+        Err(_) => {
+            eprintln!(
+                "{}: could not read the files from the configuration file.",
+                "ERROR".red()
+            );
+            std::process::exit(1)
+        }
+    };
 
     let server = match Server::default()
         .threads(config.threads)
