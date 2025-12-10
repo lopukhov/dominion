@@ -15,15 +15,19 @@ mod txt;
 pub struct Chat<'a> {
     domain: Name<'a>,
     xor: Option<Xor>,
+    answers: a::AHandler,
     files: Option<txt::TxtHandler>,
 }
+type SMap = BTreeMap<String, String>;
 
 impl<'a> Chat<'a> {
-    pub fn new(name: Name<'a>, xor: Option<Xor>, files: Option<BTreeMap<String, String>>) -> Self {
+    pub fn new(name: Name<'a>, xor: Option<Xor>, files: Option<SMap>, answers: SMap) -> Self {
+        let answers = a::AHandler::new(answers);
         let files = files.map(|f| txt::TxtHandler::new(f.into_iter()));
         Chat {
             domain: name,
             files,
+            answers,
             xor,
         }
     }
@@ -33,10 +37,14 @@ impl ServerService for Chat<'_> {
     fn run<'a>(&self, client: SocketAddr, question: &'a DnsPacket<'a>) -> Option<DnsPacket<'a>> {
         if question.header.questions > 0 {
             match question.questions[0].qtype {
-                QType::A => Some(a::response(client, question, &self.domain, &self.xor)),
-                QType::Txt => {
-                    self.files.as_ref().map(|files| files.response(question, &self.domain, &self.xor))
-                }
+                QType::A => Some(
+                    self.answers
+                        .response(client, question, &self.domain, &self.xor),
+                ),
+                QType::Txt => self
+                    .files
+                    .as_ref()
+                    .map(|files| files.response(question, &self.domain, &self.xor)),
                 _ => Some(refused(question.header.id)),
             }
         } else {

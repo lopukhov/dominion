@@ -7,6 +7,10 @@ threads = 1
 key = 3
 signal = "test"
 
+[answers]
+localhost = "127.0.0.1"
+all = "0.0.0.0"
+
 [files]
 this = "test1.txt"
 is = "test2.txt"

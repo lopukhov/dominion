@@ -3,23 +3,41 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use owo_colors::OwoColorize;
-use std::net::SocketAddr;
+use std::{collections::BTreeMap, net::SocketAddr};
 
 use dominion::{DnsHeader, DnsPacket, Flags, Name, ResourceRecord};
 
-pub(crate) fn response<'a>(
-    client: SocketAddr,
-    question: &'a DnsPacket<'a>,
-    filter: &Name<'_>,
-    xor: &Option<crate::Xor>,
-) -> DnsPacket<'a> {
-    let name = question.questions[0].name.clone();
-    if filter.is_subdomain(&name) {
+#[derive(Debug)]
+pub(crate) struct AHandler {
+    answers: BTreeMap<String, String>,
+}
+
+impl AHandler {
+    pub(crate) fn new(answers: BTreeMap<String, String>) -> Self {
+        Self { answers }
+    }
+
+    pub(crate) fn response<'a>(
+        &self,
+        client: SocketAddr,
+        question: &'a DnsPacket<'a>,
+        filter: &Name<'_>,
+        xor: &Option<crate::Xor>,
+    ) -> DnsPacket<'a> {
+        let id = question.header.id;
+        let name = question.questions[0].name.clone();
+
+        // Si no es un subdominio no es una petición nuestra
+        if !filter.is_subdomain(&name) {
+            return super::refused(id);
+        }
+
         let mut labels = name.iter_hierarchy();
         let signal = labels
             .nth(filter.label_count())
             .expect("Because it is a subdomain it should have at least one more label");
         let text: String = labels.rev().collect();
+        println!("DEBUG {text}{signal}");
 
         match xor {
             Some(xor) if signal == xor.signal => {
@@ -35,22 +53,13 @@ pub(crate) fn response<'a>(
                 clear(client, &text)
             }
         }
-    }
 
-    let header = DnsHeader {
-        id: question.header.id,
-        flags: flags(),
-        questions: 1,
-        answers: 1,
-        authority: 0,
-        additional: 0,
-    };
-    DnsPacket {
-        header,
-        questions: question.questions.clone(),
-        answers: vec![answer(name)],
-        authority: vec![],
-        additional: vec![],
+        // Usamos solo la signal porque el texto puede estar vacío
+        let ip = match self.answers.get(signal) {
+            Some(ip) => ip,
+            None => "127.0.0.1",
+        };
+        answer(question, ip)
     }
 }
 
@@ -89,8 +98,9 @@ fn flags() -> Flags {
     }
 }
 
-fn answer(name: Name<'_>) -> ResourceRecord<'_> {
+fn answer<'a>(question: &'a DnsPacket<'a>, ip: &str) -> DnsPacket<'a> {
     use dominion::RecordPreamble;
+    let name = question.questions[0].name.clone();
     let preamble = RecordPreamble {
         name,
         rrtype: dominion::Type::A,
@@ -98,9 +108,25 @@ fn answer(name: Name<'_>) -> ResourceRecord<'_> {
         ttl: 0,
         rdlen: 4,
     };
-    ResourceRecord {
+    let rr = ResourceRecord {
         preamble,
-        data: dominion::RecordData::A("127.0.0.1".parse().unwrap()),
+        data: dominion::RecordData::A(ip.parse().unwrap()),
+    };
+
+    let header = DnsHeader {
+        id: question.header.id,
+        flags: flags(),
+        questions: 1,
+        answers: 1,
+        authority: 0,
+        additional: 0,
+    };
+    DnsPacket {
+        header,
+        questions: question.questions.clone(),
+        answers: vec![rr],
+        authority: vec![],
+        additional: vec![],
     }
 }
 

@@ -24,6 +24,7 @@ struct Configuration {
     domain: String,
     threads: usize,
     xor: Option<Xor>,
+    answers: BTreeMap<String, String>,
     files: Option<BTreeMap<String, String>>,
 }
 
@@ -52,6 +53,7 @@ struct RawConfig {
     port: Option<u16>,
     domain: Option<String>,
     xor: Option<Xor>,
+    answers: Option<BTreeMap<String, String>>,
     files: Option<BTreeMap<String, String>>,
 }
 
@@ -69,7 +71,7 @@ fn main() {
         }
     };
 
-    let chat = dominion_chat::Chat::new(name, config.xor, config.files);
+    let chat = dominion_chat::Chat::new(name, config.xor, config.files, config.answers);
 
     let server = match Server::default()
         .threads(config.threads)
@@ -108,6 +110,7 @@ fn configuration() -> Configuration {
             port: None,
             domain: None,
             xor: None,
+            answers: None,
             files: None,
         },
     };
@@ -116,6 +119,7 @@ fn configuration() -> Configuration {
     let port = select_cfg!(args.port, config.port, 53);
     let domain = select_cfg!(args.domain, config.domain, String::new());
     let threads = select_cfg!(args.threads, config.threads, num_cpus::get());
+    let answers = config.answers.unwrap_or_default();
 
     Configuration {
         ip,
@@ -123,6 +127,7 @@ fn configuration() -> Configuration {
         domain,
         threads,
         xor: config.xor,
+        answers,
         files: config.files,
     }
 }
