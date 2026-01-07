@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeMap, path::Path, str};
+use std::{collections::BTreeMap, path::Path, str, sync::Arc};
 
 use dominion::{DnsHeader, DnsPacket, Flags, Name, ResourceRecord};
 
@@ -11,12 +11,13 @@ use memmap2::Mmap;
 const MAX_TXT_SIZE: usize = 255;
 
 #[derive(Debug)]
-pub(crate) struct TxtHandler {
+pub(crate) struct TxtHandler<'a> {
     files: BTreeMap<String, Mmap>,
+    filter: Arc<Name<'a>>,
 }
 
-impl TxtHandler {
-    pub fn new<I, P>(mapping: I) -> Result<Self, &'static str>
+impl<'me> TxtHandler<'me> {
+    pub fn new<I, P>(mapping: I, filter: Arc<Name<'me>>) -> Result<Self, &'static str>
     where
         I: Iterator<Item = (String, P)>,
         P: AsRef<Path>,
@@ -30,41 +31,33 @@ impl TxtHandler {
             let v = unsafe { Mmap::map(&fd).map_err(|_| "could not read the file")? };
             files.insert(k, v);
         }
-        Ok(Self { files })
+        Ok(Self { files, filter })
     }
 
-    pub fn response<'a>(
-        &self,
-        question: &'a DnsPacket<'a>,
-        filter: &Name<'_>,
-        xor: &Option<crate::Xor>,
-    ) -> DnsPacket<'a> {
+    pub fn response<'a>(&self, question: &'a DnsPacket<'a>) -> DnsPacket<'a> {
         let id = question.header.id;
         let name = &question.questions[0].name;
 
         // Si no es un subdominio no es una petición nuestra
-        if !filter.is_subdomain(name) {
+        if !self.filter.is_subdomain(name) {
             return super::refused(id);
         }
 
         // Obtenemos la clave del subdominio
         let mut labels = name.iter_hierarchy();
         let label = labels
-            .nth(filter.label_count())
+            .nth(self.filter.label_count())
             .expect("Because it is a subdomain it should have at least one more label");
-        log(&label);
+        log(label);
 
         // Si no podemos leer el cacho es que algo ha ido mal y rechazamos
         // la solicitud.
         let Some(chunk) = self.read_chunk(label) else {
             return super::refused(id);
         };
-        let chunk = match xor {
-            Some(xor) => encrypt(chunk, xor.key),
-            None => str::from_utf8(chunk)
-                .expect("clear text files can only be text")
-                .to_string(),
-        };
+        let chunk = str::from_utf8(chunk)
+            .expect("files can only be text")
+            .to_string();
 
         let header = DnsHeader {
             id,
@@ -93,7 +86,9 @@ impl TxtHandler {
             Some(key_i) => (key_i.0, key_i.1.parse().ok()?),
         };
 
-        // TODO esto no funciona si esta cifrado, hay que hacer un / 2
+        // Si lo mandamos cifrado y codificado el tamaño será más
+        // grande por lo que este código debería cambiar. Se limita
+        // a mandar respuestas en claro o cifradas de forma externa.
         let map = self.files.get(&file.to_ascii_lowercase())?;
         let i = i * MAX_TXT_SIZE;
         let j = min(map.len(), i + MAX_TXT_SIZE);
@@ -103,11 +98,6 @@ impl TxtHandler {
 
 fn log(label: &'_ str) {
     println!("🗒️ Asked for {label}\n\n");
-}
-
-fn encrypt(label: &[u8], key: u8) -> String {
-    let out: Vec<u8> = label.iter().map(|b| b ^ key).collect();
-    hex::encode(out)
 }
 
 fn flags() -> Flags {

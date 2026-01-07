@@ -6,17 +6,15 @@
 
 use dominion::{DnsPacket, Name, QType, ServerService};
 use serde::Deserialize;
-use std::{collections::BTreeMap, net::SocketAddr};
+use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
 
 mod a;
 mod txt;
 
 #[derive(Debug)]
 pub struct Chat<'a> {
-    domain: Name<'a>,
-    xor: Option<Xor>,
-    answers: a::AHandler,
-    files: Option<txt::TxtHandler>,
+    answers: a::AHandler<'a>,
+    files: Option<txt::TxtHandler<'a>>,
 }
 type SMap = BTreeMap<String, String>;
 
@@ -27,33 +25,24 @@ impl<'a> Chat<'a> {
         files: Option<SMap>,
         answers: SMap,
     ) -> Result<Self, &'static str> {
-        let answers = a::AHandler::new(answers);
+        let name = Arc::new(name);
+        let answers = a::AHandler::new(answers, name.clone(), xor);
         let files = if let Some(files) = files {
-            Some(txt::TxtHandler::new(files.into_iter())?)
+            Some(txt::TxtHandler::new(files.into_iter(), name)?)
         } else {
             None
         };
-        Ok(Chat {
-            domain: name,
-            files,
-            answers,
-            xor,
-        })
+        Ok(Chat { files, answers })
     }
 }
 
 impl ServerService for Chat<'_> {
-    fn run<'a>(&self, client: SocketAddr, question: &'a DnsPacket<'a>) -> Option<DnsPacket<'a>> {
+    fn run<'a>(&self, _client: SocketAddr, question: &'a DnsPacket<'a>) -> Option<DnsPacket<'a>> {
         if question.header.questions > 0 {
             match question.questions[0].qtype {
-                QType::A => Some(
-                    self.answers
-                        .response(client, question, &self.domain, &self.xor),
-                ),
-                QType::Txt => self
-                    .files
-                    .as_ref()
-                    .map(|files| files.response(question, &self.domain, &self.xor)),
+                QType::A => Some(self.answers.response(question)),
+                QType::Aaaa => Some(self.answers.response_v6(question)),
+                QType::Txt => self.files.as_ref().map(|files| files.response(question)),
                 _ => Some(refused(question.header.id)),
             }
         } else {
