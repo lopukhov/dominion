@@ -52,6 +52,7 @@ impl TxtHandler {
         let label = labels
             .nth(filter.label_count())
             .expect("Because it is a subdomain it should have at least one more label");
+        log(&label);
 
         // Si no podemos leer el cacho es que algo ha ido mal y rechazamos
         // la solicitud.
@@ -86,18 +87,22 @@ impl TxtHandler {
         use std::cmp::min;
         // Key format <fileid>-<position> for example:
         //     file1-3
-        fn parse_key(key: &str) -> Option<(&str, usize)> {
-            let key_i = key.rsplit_once('-')?;
-            let i = key_i.1.parse().ok()?;
-            Some((key_i.0, i))
-        }
+        // If there is no position we asume initial position
+        let (file, i) = match key.rsplit_once('-') {
+            None => (key, 0),
+            Some(key_i) => (key_i.0, key_i.1.parse().ok()?),
+        };
 
-        let (file, i) = parse_key(key)?;
+        // TODO esto no funciona si esta cifrado, hay que hacer un / 2
         let map = self.files.get(&file.to_ascii_lowercase())?;
-        let i = i * MAX_TXT_SIZE / 2;
-        let j = min(map.len(), i + MAX_TXT_SIZE / 2);
+        let i = i * MAX_TXT_SIZE;
+        let j = min(map.len(), i + MAX_TXT_SIZE);
         map.get(i..j)
     }
+}
+
+fn log(label: &'_ str) {
+    println!("🗒️ Asked for {label}\n\n");
 }
 
 fn encrypt(label: &[u8], key: u8) -> String {

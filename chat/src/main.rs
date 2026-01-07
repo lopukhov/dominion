@@ -63,10 +63,7 @@ fn main() {
     let name = match Name::try_from(config.domain.as_ref()) {
         Ok(name) => name,
         Err(_) => {
-            eprintln!(
-                "{}: could not parse the domain name because some label is too big.",
-                "ERROR".red()
-            );
+            eprintln!("{}: could not parse the domain name.", "ERROR".red());
             std::process::exit(1)
         }
     };

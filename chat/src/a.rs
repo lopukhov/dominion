@@ -37,7 +37,6 @@ impl AHandler {
             .nth(filter.label_count())
             .expect("Because it is a subdomain it should have at least one more label");
         let text: String = labels.rev().collect();
-        println!("DEBUG {text}{signal}");
 
         match xor {
             Some(xor) if signal == xor.signal => {
