@@ -3,13 +3,9 @@ port = 5353
 domain = "example.com"
 threads = 1
 
-[xor]
-key = 3
-signal = "test"
-
 [answers]
-localhost = "127.0.0.1"
-all = "0.0.0.0"
+a = "127.0.0.1"
+aaaa = "::1"
 
 [files]
 this = "test1.txt"

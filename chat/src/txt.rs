@@ -7,6 +7,7 @@ use std::{collections::BTreeMap, path::Path, str, sync::Arc};
 use dominion::{DnsHeader, DnsPacket, Flags, Name, ResourceRecord};
 
 use memmap2::Mmap;
+use owo_colors::OwoColorize;
 
 const MAX_TXT_SIZE: usize = 255;
 
@@ -97,7 +98,7 @@ impl<'me> TxtHandler<'me> {
 }
 
 fn log(label: &'_ str) {
-    println!("🗒️ Asked for {label}\n\n");
+    println!("🗒️ {} Asked for {label}\n\n", "TXT".green());
 }
 
 fn flags() -> Flags {

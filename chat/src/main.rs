@@ -5,8 +5,6 @@
 #![forbid(unsafe_code)]
 #![warn(rust_2018_idioms, missing_debug_implementations)]
 
-use dominion_chat::Xor;
-
 use argh::FromArgs;
 use dominion::{Name, Server};
 use owo_colors::OwoColorize;
@@ -23,7 +21,6 @@ struct Configuration {
     port: u16,
     domain: String,
     threads: usize,
-    xor: Option<Xor>,
     answers: BTreeMap<String, String>,
     files: Option<BTreeMap<String, String>>,
 }
@@ -52,7 +49,6 @@ struct RawConfig {
     ip: Option<IpAddr>,
     port: Option<u16>,
     domain: Option<String>,
-    xor: Option<Xor>,
     answers: Option<BTreeMap<String, String>>,
     files: Option<BTreeMap<String, String>>,
 }
@@ -68,7 +64,7 @@ fn main() {
         }
     };
 
-    let chat = match dominion_chat::Chat::new(name, config.xor, config.files, config.answers) {
+    let chat = match dominion_chat::Chat::new(name, config.files, config.answers) {
         Ok(chat) => chat,
         Err(_) => {
             eprintln!(
@@ -115,7 +111,6 @@ fn configuration() -> Configuration {
             ip: None,
             port: None,
             domain: None,
-            xor: None,
             answers: None,
             files: None,
         },
@@ -132,7 +127,6 @@ fn configuration() -> Configuration {
         port,
         domain,
         threads,
-        xor: config.xor,
         answers,
         files: config.files,
     }

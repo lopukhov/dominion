@@ -11,36 +11,21 @@ use dominion::{DnsHeader, DnsPacket, Flags, Name, ResourceRecord};
 pub(crate) struct AHandler<'a> {
     answers: BTreeMap<String, String>,
     filter: Arc<Name<'a>>,
-    xor: Option<crate::Xor>,
 }
 
 impl<'me> AHandler<'me> {
-    pub(crate) fn new(
-        answers: BTreeMap<String, String>,
-        filter: Arc<Name<'me>>,
-        xor: Option<crate::Xor>,
-    ) -> Self {
-        Self {
-            answers,
-            filter,
-            xor,
-        }
+    pub(crate) fn new(answers: BTreeMap<String, String>, filter: Arc<Name<'me>>) -> Self {
+        Self { answers, filter }
     }
 
     pub(crate) fn response<'a>(&self, question: &'a DnsPacket<'a>) -> DnsPacket<'a> {
         let id = question.header.id;
         let name = question.questions[0].name.clone();
-        let printer = |msg: &_, e| {
-            if e {
-                println!("🔒 {}\n\n\t{}\n\n", "A".red(), msg);
-            } else {
-                println!("✉️  {}\n\n\t{}\n\n", "A".red(), msg);
-            }
-        };
-        let Some(label) = self.read_message(&name, printer) else {
+        let Some(text) = self.read_message(&name) else {
             return super::refused(id);
         };
-        let ip = match self.answers.get(&label.to_ascii_lowercase()) {
+        println!("✉️  {}\n\n\t{text}\n\n", "A".red());
+        let ip = match self.answers.get(&text.to_ascii_lowercase()) {
             Some(ip) => ip,
             None => "127.0.0.1",
         };
@@ -50,60 +35,31 @@ impl<'me> AHandler<'me> {
     pub(crate) fn response_v6<'a>(&self, question: &'a DnsPacket<'a>) -> DnsPacket<'a> {
         let id = question.header.id;
         let name = question.questions[0].name.clone();
-        let printer = |msg: &_, e| {
-            if e {
-                println!("🔒 {}\n\n\t{}\n\n", "AAAA".blue(), msg);
-            } else {
-                println!("✉️  {}\n\n\t{}\n\n", "AAAA".blue(), msg);
-            }
-        };
-        let Some(label) = self.read_message(&name, printer) else {
+        let Some(text) = self.read_message(&name) else {
             return super::refused(id);
         };
-        let ip = match self.answers.get(&label.to_ascii_lowercase()) {
+        println!("✉️  {}\n\n\t{text}\n\n", "AAAA".blue());
+        let ip = match self.answers.get(&text.to_ascii_lowercase()) {
             Some(ip) => ip,
             None => "::1",
         };
         answer_v6(question, ip)
     }
 
-    fn read_message<'a>(&self, name: &'a Name<'a>, printer: fn(&str, bool)) -> Option<&'a str> {
+    fn read_message<'a>(&self, name: &'a Name<'a>) -> Option<String> {
         // Si no es un subdominio no es una petición nuestra
         if !self.filter.is_subdomain(name) {
             return None;
         }
 
         let mut labels = name.iter_hierarchy();
-        let signal = labels
-            .nth(self.filter.label_count())
+        // Descartamos la parte del domino conocido
+        let _ = labels
+            .nth(self.filter.label_count() - 1)
             .expect("Because it is a subdomain it should have at least one more label");
         let text: String = labels.rev().collect();
-
-        match &self.xor {
-            Some(xor) if signal == xor.signal => {
-                if let Some(text) = decrypt(&text, xor.key) {
-                    printer(&text, true);
-                } else {
-                    let text = format!("Cannot decrypt {text}");
-                    printer(&text, false)
-                }
-            }
-            _ => {
-                let text = format!("{text}{signal}");
-                printer(&text, false)
-            }
-        }
-        // Usamos solo la signal porque el texto puede estar vacío
-        Some(signal)
+        Some(text)
     }
-}
-
-fn decrypt(label: impl AsRef<[u8]>, key: u8) -> Option<String> {
-    let mut bytes = hex::decode(label).ok()?;
-    for b in &mut bytes {
-        *b ^= key
-    }
-    Some(String::from_utf8_lossy(&bytes).into())
 }
 
 fn flags() -> Flags {
@@ -184,18 +140,5 @@ fn answer_v6<'a>(question: &'a DnsPacket<'a>, ip: &str) -> DnsPacket<'a> {
         answers: vec![rr],
         authority: vec![],
         additional: vec![],
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decrypt_xor() {
-        let key = 0x5;
-        let bytes = "71607671257d6a7725616066777c7571";
-        let plain = decrypt(bytes, key);
-        assert_eq!(Some("test xor decrypt".to_string()), plain)
     }
 }

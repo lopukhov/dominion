@@ -5,7 +5,6 @@
 #![warn(rust_2018_idioms, missing_debug_implementations)]
 
 use dominion::{DnsPacket, Name, QType, ServerService};
-use serde::Deserialize;
 use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
 
 mod a;
@@ -13,26 +12,24 @@ mod txt;
 
 #[derive(Debug)]
 pub struct Chat<'a> {
-    answers: a::AHandler<'a>,
-    files: Option<txt::TxtHandler<'a>>,
+    a_handler: a::AHandler<'a>,
+    txt_handler: Option<txt::TxtHandler<'a>>,
 }
 type SMap = BTreeMap<String, String>;
 
 impl<'a> Chat<'a> {
-    pub fn new(
-        name: Name<'a>,
-        xor: Option<Xor>,
-        files: Option<SMap>,
-        answers: SMap,
-    ) -> Result<Self, &'static str> {
+    pub fn new(name: Name<'a>, files: Option<SMap>, answers: SMap) -> Result<Self, &'static str> {
         let name = Arc::new(name);
-        let answers = a::AHandler::new(answers, name.clone(), xor);
-        let files = if let Some(files) = files {
+        let a_handler = a::AHandler::new(answers, name.clone());
+        let txt_handler = if let Some(files) = files {
             Some(txt::TxtHandler::new(files.into_iter(), name)?)
         } else {
             None
         };
-        Ok(Chat { files, answers })
+        Ok(Chat {
+            a_handler,
+            txt_handler,
+        })
     }
 }
 
@@ -40,22 +37,18 @@ impl ServerService for Chat<'_> {
     fn run<'a>(&self, _client: SocketAddr, question: &'a DnsPacket<'a>) -> Option<DnsPacket<'a>> {
         if question.header.questions > 0 {
             match question.questions[0].qtype {
-                QType::A => Some(self.answers.response(question)),
-                QType::Aaaa => Some(self.answers.response_v6(question)),
-                QType::Txt => self.files.as_ref().map(|files| files.response(question)),
+                QType::A => Some(self.a_handler.response(question)),
+                QType::Aaaa => Some(self.a_handler.response_v6(question)),
+                QType::Txt => self
+                    .txt_handler
+                    .as_ref()
+                    .map(|files| files.response(question)),
                 _ => Some(refused(question.header.id)),
             }
         } else {
             Some(refused(question.header.id))
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-/// Configuration from file
-pub struct Xor {
-    key: u8,
-    signal: String,
 }
 
 fn refused(id: u16) -> DnsPacket<'static> {
