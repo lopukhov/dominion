@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::binutils::*;
 use crate::ParseError;
+use crate::binutils::*;
 
 use thiserror::Error;
 
@@ -89,9 +89,33 @@ impl<'a> TryFrom<&'a str> for Name<'a> {
     type Error = NameError;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        let bytes = value.as_bytes();
+        let labels = match bytes[bytes.len() - 1] {
+            b'.' => str::from_utf8(&bytes[..bytes.len() - 1]).expect("&str was valid previously"),
+            _ => &value,
+        };
+
         let mut name = Name::default();
-        for label in value.rsplit('.') {
+        for label in labels.rsplit('.') {
             name.push_label(label.into())?;
+        }
+        Ok(name)
+    }
+}
+
+impl<'a> TryFrom<String> for Name<'a> {
+    type Error = NameError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let bytes = value.as_bytes();
+        let labels = match bytes[bytes.len() - 1] {
+            b'.' => str::from_utf8(&bytes[..bytes.len() - 1]).expect("&str was valid previously"),
+            _ => &value,
+        };
+
+        let mut name = Name::default();
+        for label in labels.rsplit('.') {
+            name.push_label(label.to_owned().into())?;
         }
         Ok(name)
     }
@@ -238,6 +262,18 @@ impl<'a> Name<'a> {
     #[inline]
     pub fn label_count(&self) -> usize {
         self.labels.len()
+    }
+
+    /// Get the size of the domain name in bytes.
+    ///
+    /// ```
+    /// # use dominion_parser::body::name::Name;
+    /// let mut name = Name::try_from("example.com").unwrap();
+    /// assert_eq!(13, name.size())
+    /// ```
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.len as usize + self.label_count() + 1
     }
 
     /// Check if `sub` is a subdomain of the current domain name.

@@ -8,19 +8,23 @@ use dominion::{DnsPacket, Name, QType, ServerService};
 use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
 
 mod a;
+mod cname;
 mod txt;
 
 #[derive(Debug)]
 pub struct Chat<'a> {
     a_handler: a::AHandler<'a>,
     txt_handler: Option<txt::TxtHandler<'a>>,
+    cname_handler: cname::CnameHandler<'a>,
 }
 type SMap = BTreeMap<String, String>;
 
 impl<'a> Chat<'a> {
     pub fn new(name: Name<'a>, files: Option<SMap>, answers: SMap) -> Result<Self, &'static str> {
         let name = Arc::new(name);
-        let a_handler = a::AHandler::new(answers, name.clone());
+        let answers = Arc::new(answers);
+        let a_handler = a::AHandler::new(answers.clone(), name.clone());
+        let cname_handler = cname::CnameHandler::new(answers, name.clone());
         let txt_handler = if let Some(files) = files {
             Some(txt::TxtHandler::new(files.into_iter(), name)?)
         } else {
@@ -29,6 +33,7 @@ impl<'a> Chat<'a> {
         Ok(Chat {
             a_handler,
             txt_handler,
+            cname_handler,
         })
     }
 }
@@ -39,6 +44,7 @@ impl ServerService for Chat<'_> {
             match question.questions[0].qtype {
                 QType::A => Some(self.a_handler.response(question)),
                 QType::Aaaa => Some(self.a_handler.response_v6(question)),
+                QType::Cname => Some(self.cname_handler.response(question)),
                 QType::Txt => self
                     .txt_handler
                     .as_ref()

@@ -10,42 +10,28 @@ use dominion::{DnsHeader, DnsPacket, Flags, Name, ResourceRecord};
 type Answers = Arc<BTreeMap<String, String>>;
 
 #[derive(Debug)]
-pub(crate) struct AHandler<'a> {
+pub(crate) struct CnameHandler<'a> {
     answers: Answers,
     filter: Arc<Name<'a>>,
 }
 
-impl<'me> AHandler<'me> {
+impl<'me> CnameHandler<'me> {
     pub(crate) fn new(answers: Answers, filter: Arc<Name<'me>>) -> Self {
         Self { answers, filter }
     }
 
     pub(crate) fn response<'a>(&self, question: &'a DnsPacket<'a>) -> DnsPacket<'a> {
         let id = question.header.id;
-        let name = question.questions[0].name.clone();
-        let Some(text) = self.read_message(&name) else {
+        let name = &question.questions[0].name;
+        let Some(text) = self.read_message(name) else {
             return super::refused(id);
         };
-        println!("✉️  {}\n\n\t{text}\n\n", "A".red());
-        let ip = match self.answers.get(&text.to_ascii_lowercase()) {
-            Some(ip) => ip,
-            None => "127.0.0.1",
+        println!("📋️  {}\n\n\t{text}\n\n", "CNAME".purple());
+        let dname = match self.answers.get(&text.to_ascii_lowercase()) {
+            Some(dname) => dname.to_string(),
+            None => self.filter.to_string(),
         };
-        answer(question, ip)
-    }
-
-    pub(crate) fn response_v6<'a>(&self, question: &'a DnsPacket<'a>) -> DnsPacket<'a> {
-        let id = question.header.id;
-        let name = question.questions[0].name.clone();
-        let Some(text) = self.read_message(&name) else {
-            return super::refused(id);
-        };
-        println!("✉️  {}\n\n\t{text}\n\n", "AAAA".blue());
-        let ip = match self.answers.get(&text.to_ascii_lowercase()) {
-            Some(ip) => ip,
-            None => "::1",
-        };
-        answer_v6(question, ip)
+        answer(question, dname)
     }
 
     fn read_message<'a>(&self, name: &'a Name<'a>) -> Option<String> {
@@ -81,51 +67,20 @@ fn flags() -> Flags {
     }
 }
 
-fn answer<'a>(question: &'a DnsPacket<'a>, ip: &str) -> DnsPacket<'a> {
+fn answer<'a>(question: &'a DnsPacket<'a>, dname: String) -> DnsPacket<'a> {
     use dominion::RecordPreamble;
+    let dname: Name<'_> = dname.try_into().expect("could not parse domain name");
     let name = question.questions[0].name.clone();
     let preamble = RecordPreamble {
         name,
-        rrtype: dominion::Type::A,
+        rrtype: dominion::Type::Cname,
         class: dominion::Class::IN,
         ttl: 0,
-        rdlen: 4,
+        rdlen: dname.size() as _,
     };
     let rr = ResourceRecord {
         preamble,
-        data: dominion::RecordData::A(ip.parse().unwrap()),
-    };
-
-    let header = DnsHeader {
-        id: question.header.id,
-        flags: flags(),
-        questions: 1,
-        answers: 1,
-        authority: 0,
-        additional: 0,
-    };
-    DnsPacket {
-        header,
-        questions: question.questions.clone(),
-        answers: vec![rr],
-        authority: vec![],
-        additional: vec![],
-    }
-}
-
-fn answer_v6<'a>(question: &'a DnsPacket<'a>, ip: &str) -> DnsPacket<'a> {
-    use dominion::RecordPreamble;
-    let name = question.questions[0].name.clone();
-    let preamble = RecordPreamble {
-        name,
-        rrtype: dominion::Type::Aaaa,
-        class: dominion::Class::IN,
-        ttl: 0,
-        rdlen: 16,
-    };
-    let rr = ResourceRecord {
-        preamble,
-        data: dominion::RecordData::Aaaa(ip.parse().unwrap()),
+        data: dominion::RecordData::Cname(dname),
     };
 
     let header = DnsHeader {
