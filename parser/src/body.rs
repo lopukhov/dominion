@@ -5,9 +5,9 @@
 /// Domain name structure and funtions
 pub mod name;
 
+use crate::ParseError;
 use crate::binutils::*;
 use crate::body::name::Name;
-use crate::ParseError;
 use std::borrow::Cow;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str;

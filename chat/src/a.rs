@@ -40,7 +40,7 @@ impl<'me> AHandler<'me> {
         let Some(label) = self.read_message(&name, printer) else {
             return super::refused(id);
         };
-        let ip = match self.answers.get(label) {
+        let ip = match self.answers.get(&label.to_ascii_lowercase()) {
             Some(ip) => ip,
             None => "127.0.0.1",
         };
@@ -60,7 +60,7 @@ impl<'me> AHandler<'me> {
         let Some(label) = self.read_message(&name, printer) else {
             return super::refused(id);
         };
-        let ip = match self.answers.get(label) {
+        let ip = match self.answers.get(&label.to_ascii_lowercase()) {
             Some(ip) => ip,
             None => "::1",
         };
